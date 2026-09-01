@@ -1,0 +1,67 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  admin_token: "admin-secret-token-change-me"
+
+load_balancing:
+  strategy: "latency_aware" # round_robin | weighted_round_robin | least_connections | latency_aware
+
+backends:
+  - id: "backend-1"
+    host: "backend-1"
+    port: 8001
+    weight: 1
+  - id: "backend-2"
+    host: "backend-2"
+    port: 8002
+    weight: 2
+  - id: "backend-3"
+    host: "backend-3"
+    port: 8003
+    weight: 1
+
+health_check:
+  interval: 5
+  timeout: 2
+  failure_threshold: 3
+  recovery_threshold: 2
+  path: "/health"
+
+circuit_breaker:
+  failure_threshold: 5
+  recovery_timeout: 10
+  half_open_requests: 1
+
+connection_pool:
+  max_connections_per_backend: 100
+  max_idle_connections: 20
+  idle_timeout: 30
+
+timeouts:
+  connect: 2.0
+  read: 5.0
+  write: 5.0
+  idle: 30.0
+
+retry:
+  enabled: true
+  max_attempts: 2
+  retryable_methods: ["GET", "HEAD"]
+  retryable_status_codes: [502, 503, 504]
+
+backpressure:
+  max_concurrent_requests: 100
+  max_queue_size: 50
+  queue_timeout: 1.0
+
+logging:
+  level: "INFO"
+  format: "json"
+
+metrics:
+  enabled: true
+  path: "/metrics"
+
+request:
+  max_body_size: 10485760 # 10MB
+  max_header_size: 8192
