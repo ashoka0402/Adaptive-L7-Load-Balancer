@@ -1,0 +1,77 @@
+services:
+  load-balancer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      - backend-1
+      - backend-2
+      - backend-3
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  backend-1:
+    build:
+      context: .
+      dockerfile: backends/Dockerfile
+    environment:
+      - FAILURE_MODE=normal
+      - SLOW_MS=20
+    command: ["python", "-m", "backends.server", "--port", "8001", "--id", "backend-1", "--mode", "normal"]
+    expose:
+      - "8001"
+    restart: unless-stopped
+
+  backend-2:
+    build:
+      context: .
+      dockerfile: backends/Dockerfile
+    environment:
+      - FAILURE_MODE=slow
+      - SLOW_MS=100
+    command: ["python", "-m", "backends.server", "--port", "8002", "--id", "backend-2", "--mode", "slow", "--slow-ms", "100"]
+    expose:
+      - "8002"
+    restart: unless-stopped
+
+  backend-3:
+    build:
+      context: .
+      dockerfile: backends/Dockerfile
+    environment:
+      - FAILURE_MODE=normal
+      - SLOW_MS=20
+    command: ["python", "-m", "backends.server", "--port", "8003", "--id", "backend-3", "--mode", "normal"]
+    expose:
+      - "8003"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - load-balancer
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
