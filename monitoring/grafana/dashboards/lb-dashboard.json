@@ -1,0 +1,138 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Requests / sec",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(lb_requests_total[1m]))",
+          "legendFormat": "rps"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "title": "P50 / P95 / P99 Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(lb_request_latency_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(lb_request_latency_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(lb_request_latency_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Error Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(lb_failed_requests_total[1m])) / (sum(rate(lb_requests_total[1m])) + 0.001)",
+          "legendFormat": "error_rate"
+        },
+        {
+          "expr": "sum(rate(lb_rejected_requests_total[1m]))",
+          "legendFormat": "rejected"
+        }
+      ]
+    },
+    {
+      "title": "Requests per Backend",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(lb_backend_requests_total[1m])) by (backend)",
+          "legendFormat": "{{backend}}"
+        }
+      ]
+    },
+    {
+      "title": "Backend Health",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "lb_backend_health_status",
+          "legendFormat": "{{backend}}"
+        }
+      ]
+    },
+    {
+      "title": "Circuit Breaker State",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "targets": [
+        {
+          "expr": "lb_backend_circuit_state",
+          "legendFormat": "{{backend}}"
+        }
+      ]
+    },
+    {
+      "title": "Backend Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(lb_backend_latency_seconds_bucket[1m])) by (le, backend))",
+          "legendFormat": "{{backend}} p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Active Connections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "expr": "lb_backend_active_connections",
+          "legendFormat": "{{backend}}"
+        },
+        {
+          "expr": "lb_active_requests",
+          "legendFormat": "lb_active"
+        }
+      ]
+    },
+    {
+      "title": "Queue Size / Rejected",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 },
+      "targets": [
+        {
+          "expr": "lb_queue_size",
+          "legendFormat": "queue"
+        },
+        {
+          "expr": "sum(rate(lb_rejected_requests_total[1m]))",
+          "legendFormat": "rejected/s"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "tags": ["load-balancer", "adaptive"],
+  "timezone": "browser",
+  "title": "Adaptive L7 Load Balancer",
+  "uid": "adaptive-l7-lb",
+  "version": 1
+}
