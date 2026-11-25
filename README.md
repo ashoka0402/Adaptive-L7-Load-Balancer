@@ -18,8 +18,8 @@ To start optional Prometheus and Grafana, run `docker compose up -d prometheus g
 
 ## Two screens
 
-- **Dashboard:** switch the real routing algorithm, see request counts, throughput, p95 latency, errors, backend health, active connections and distribution; generate bounded HTTP traffic and disable/re-enable backends.
-- **Battle Arena:** compare all four algorithms using the same seeded workload. Choose real local HTTP or labeled queue simulation. View throughput, p95/p99 and error counts.
+- **Dashboard:** switch the real routing algorithm, see request counts, throughput, latency percentiles, errors, backend health, active connections, queue pressure and distribution; generate bounded paced or unpaced HTTP traffic and disable/re-enable backends.
+- **Battle Arena:** compare all four algorithms using the same seeded workload. Choose real local HTTP or labeled queue simulation. View throughput, latency, errors and backend distribution. Choose normal, slow backend, outage/recovery or limited capacity scenarios. Dark and light themes are available.
 
 ## Four routing algorithms
 

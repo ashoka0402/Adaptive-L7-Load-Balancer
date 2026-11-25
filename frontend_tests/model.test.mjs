@@ -6,3 +6,5 @@ test("escapes untrusted backend names",()=>assert.equal(esc('<img onerror="x">')
 test("no fake metrics for missing data",()=>assert.equal(number(null),"—"));
 test("distribution is bounded",()=>{assert.equal(share(3,12),25);assert.equal(share(0,0),0);assert.equal(share(10,2),100)});
 test("arena compares exactly four supported strategies",()=>{assert.deepEqual(arenaSpec("http",50,3,"steady").algorithms,Object.keys(ALGORITHMS));assert.throws(()=>arenaSpec("http",1000,3,"steady"));assert.throws(()=>arenaSpec("http",50,11,"steady"))});
+
+test("scenario presets use the same explicit fault schedule for every algorithm",()=>{const spec=arenaSpec("http",50,4,"ramp","outage");assert.equal(spec.faults[0].kind,"down");assert.equal(spec.faults[0].at,1.2);assert.equal(spec.faults[1].kind,"restore");assert.equal(spec.faults[1].at,3);assert.equal(spec.algorithms.length,4);assert.equal(arenaSpec("http",100,10,"burst","overload").nodes[0].capacity,1);assert.throws(()=>arenaSpec("http",50,3,"steady","invalid"))});

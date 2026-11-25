@@ -15,3 +15,5 @@ python -m playwright install chromium
 node --test frontend_tests/model.test.mjs
 python -m pytest browser_tests -ra
 ```
+
+The console defaults to dark mode, supports a persistent light theme, and adds measured p50/p95/p99, active/queued requests and error-rate graphs. The backend topology is a snapshot of cumulative request counters, not packet animation. Traffic generation accepts a bounded global rate limit (0 = unpaced), and offers normal/heavy/sustained presets. Arena adds ramp-up traffic and normal, slowdown, outage/recovery, and limited-capacity scenarios; both modes use the same configured scenario for every strategy. HTTP faults are application-level synthetic conditions on real loopback HTTP servers. No automatic scaling is implemented.
