@@ -25,10 +25,8 @@ async def test_console_end_to_end():
             await page.reload()
             await expect(page.locator("html")).to_have_attribute("data-theme", "light")
             await page.get_by_role("button", name="Switch to dark mode").click()
-            await page.get_by_role("button", name="Connect", exact=True).click()
-            await page.get_by_label("Admin token").fill("integration-secret-token")
-            await page.get_by_role("dialog").get_by_role("button", name="Connect", exact=True).click()
             await expect(page.locator("#connection")).to_have_text("Connected")
+            await expect(page.get_by_label("Admin token")).to_have_count(0)
             await page.get_by_label("Routing algorithm").select_option("least_connections")
             await expect(page.locator("#notice")).to_contain_text("Least Connections")
             assert pulse.config.load_balancing.strategy == "least_connections"

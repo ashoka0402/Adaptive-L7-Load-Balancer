@@ -95,7 +95,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      PULSE_ADMIN_TOKEN: ci-local-only-smoke-token
       GRAFANA_ADMIN_PASSWORD: ci-local-only-grafana-password
     steps:
       - uses: actions/checkout@v4
@@ -105,12 +104,12 @@ jobs:
           docker compose -f docker-compose.lab.yml config --quiet
       - name: Build and launch Pulse with its three demo backends
         run: docker compose up -d --build load-balancer
-      - name: Check real proxy, console, and authenticated control plane
+      - name: Check real proxy, console, and local control plane
         run: |
           curl --fail --retry 20 --retry-delay 2 --retry-all-errors http://127.0.0.1:8080/pulse/
           curl --fail --retry 20 --retry-delay 2 --retry-all-errors http://127.0.0.1:8080/api/test
-          curl --fail -H "Authorization: Bearer $PULSE_ADMIN_TOKEN" http://127.0.0.1:8080/admin/console
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/admin/console)" = 401
+          curl --fail http://127.0.0.1:8080/admin/console
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: external.example' http://127.0.0.1:8080/admin/console)" = 403
       - name: Run network-isolated Docker Arena
         run: |
           mkdir -p reports

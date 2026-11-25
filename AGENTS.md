@@ -32,7 +32,7 @@ Pulse is a single-process, asynchronous L7 traffic engine. Keep it a modular mon
 
 ## Security
 
-- Never commit credentials or use the sample admin token outside local development.
+- Never commit credentials. Keep the token-free demo bound to loopback on the host; management is not authenticated.
 - Treat admin payloads, backend addresses, forwarded headers, and telemetry as untrusted input.
 - Validate backend destinations and resource bounds before supporting an internet-exposed control plane.
 - Strip static and `Connection`-nominated hop-by-hop headers on both request and response paths.

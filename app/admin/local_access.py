@@ -21,7 +21,7 @@ async def local_management(request: web.Request, handler):
             origin is not None and origin != f"{request.scheme}://{host}"
         ) or request.headers.get("Sec-Fetch-Site") == "cross-site":
             raise web.HTTPForbidden(text="Local management only")
-        if request.path.startswith("/admin/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
-            if request.headers.get("X-Pulse-Local") != "1":
-                raise web.HTTPForbidden(text="Local management header required")
+        if (request.path.startswith("/admin/") and request.method not in {"GET", "HEAD", "OPTIONS"}
+                and request.headers.get("X-Pulse-Local") != "1"):
+            raise web.HTTPForbidden(text="Local management header required")
     return await handler(request)

@@ -1,6 +1,6 @@
 # Console
 
-Start the proxy and visit `/pulse/`. Connect using the configured `PULSE_ADMIN_TOKEN`. The token is held only in page memory.
+Start the proxy and visit `/pulse/`. The dashboard connects automatically. Keep the published port on loopback; local management mutations use the non-secret `X-Pulse-Local: 1` header for browser request protection.
 
 Dashboard: four live metrics, two rolling charts, backend health and distribution, routing algorithm selector and bounded traffic generation. Select a strategy and send actual HTTP requests. Disable/re-enable a server to demonstrate traffic exclusion. Runtime changes reset when the process restarts.
 

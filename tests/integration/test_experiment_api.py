@@ -8,11 +8,11 @@ from tests.integration.test_proxy import running_stack
 
 
 @pytest.mark.asyncio
-async def test_experiment_api_auth_and_replay():
-    headers = {"Authorization": "Bearer integration-secret-token"}
+async def test_experiment_api_local_header_and_replay():
+    headers = {"X-Pulse-Local": "1"}
     async with running_stack() as (pulse, _state, url), aiohttp.ClientSession() as session:
         async with session.post(f"{url}/admin/experiments",json={}) as response:
-            assert response.status==401
+            assert response.status==403
         async with session.post(f"{url}/admin/experiments",headers=headers,
                                 json={"target":"http://example.com"}) as response:
             assert response.status==400

@@ -1,6 +1,6 @@
 # Five-minute demo
 
-1. Start Docker Compose and open the Dashboard. Connect with the admin token.
+1. Start Docker Compose and open the Dashboard. The dashboard connects automatically.
 2. Choose Round Robin. Generate 200 requests at concurrency 10. Explain distribution and server latency.
 3. Choose Weighted Round Robin and generate another batch. The configured weights are 1:2:1; backend counters are cumulative.
 4. Disable one backend, generate traffic again and re-enable it. Explain the difference between manual disable, active health checks and circuit breaking.

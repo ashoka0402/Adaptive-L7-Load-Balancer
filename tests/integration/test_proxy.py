@@ -44,7 +44,7 @@ async def running_stack(*, response_status: int = 200, delay: float = 0):
     backend_port = backend_site._server.sockets[0].getsockname()[1]
 
     config = AppConfig(
-        server=ServerConfig(host="127.0.0.1", port=0, admin_token="integration-secret-token"),
+        server=ServerConfig(host="127.0.0.1", port=0),
         backends=[BackendConfig(id="backend", host="127.0.0.1", port=backend_port)],
         allowed_dynamic_destinations=[AllowedDestination(host="127.0.0.1", port=8999)],
         health_check=HealthCheckConfig(interval=60),
@@ -116,7 +116,7 @@ async def test_cancelled_half_open_request_releases_recovery_probe():
 
 @pytest.mark.asyncio
 async def test_invalid_admin_update_is_atomic_and_bounded():
-    headers = {"Authorization": "Bearer integration-secret-token"}
+    headers = {"X-Pulse-Local": "1"}
     async with running_stack() as (pulse, _state, url), aiohttp.ClientSession() as session:
         async with session.patch(
             f"{url}/admin/backends/backend",
@@ -138,7 +138,7 @@ async def test_invalid_admin_update_is_atomic_and_bounded():
 
 @pytest.mark.asyncio
 async def test_admin_backend_changes_update_registry():
-    headers = {"Authorization": "Bearer integration-secret-token"}
+    headers = {"X-Pulse-Local": "1"}
     async with running_stack() as (pulse, _state, url), aiohttp.ClientSession() as session:
         async with session.post(
             f"{url}/admin/backends",

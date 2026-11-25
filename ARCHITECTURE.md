@@ -7,7 +7,7 @@ Pulse is a modular monolith on one asyncio event loop.
 - `app/routing/`: four routing algorithms with a common interface.
 - `app/models/backend.py`: backend registry, request counters, EWMA and health state.
 - `app/health/`, `app/resilience/`, `app/pool/`: active/passive health, circuit breaker, retry, backpressure and shared aiohttp connection pooling.
-- `app/admin/`, `app/ui/`: bearer-authenticated management and live dashboard, served on the same origin.
+- `app/admin/`, `app/ui/`: local-only token-free management and live dashboard, served on the same origin.
 - `app/experiments/`: isolated real loopback HTTP and seeded simulation; identical workload per algorithm.
 - `app/persistence/`: bounded SQLite experiment result retention.
 - `app/metrics/`: optional Prometheus monitoring; Grafana is optional infrastructure.

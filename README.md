@@ -7,14 +7,12 @@ A focused Python asyncio project that demonstrates HTTP reverse proxying, routin
 Start Docker Desktop and run from the repository in PowerShell:
 
 ```powershell
-$env:PULSE_ADMIN_TOKEN = "replace-with-a-long-local-secret"
-$env:GRAFANA_ADMIN_PASSWORD = "replace-with-a-different-local-secret"
 docker compose up --build -d load-balancer
 ```
 
-Open **http://localhost:8080/pulse/** and enter the admin token. If port 8080 is occupied, set `$env:PULSE_PORT = "8081"` before starting Compose and open port 8081 instead. The internal container port stays 8080.
+Open **http://localhost:8080/pulse/**; the dashboard connects automatically. If port 8080 is occupied, set `$env:PULSE_PORT = "8081"` before starting Compose and open port 8081 instead. The internal container port stays 8080.
 
-To start optional Prometheus and Grafana, run `docker compose up -d prometheus grafana`. Stop the demo with `docker compose down`.
+To start optional Prometheus and Grafana, set a unique `GRAFANA_ADMIN_PASSWORD` (Grafana has its own login), then run `docker compose up -d prometheus grafana`. Stop the demo with `docker compose down`.
 
 ## Two screens
 
@@ -30,7 +28,7 @@ To start optional Prometheus and Grafana, run `docker compose up -d prometheus g
 | Least Connections | Select the fewest active upstream requests |
 | EWMA | Prefer lower measured latency with a simple load penalty |
 
-Core reliability includes active/passive health checks, circuit breakers, safe bounded retries before response streaming, connection pooling, timeouts, bounded concurrency and backpressure. Management APIs require a bearer token. The console uses actual instance telemetry and experiment results.
+Core reliability includes active/passive health checks, circuit breakers, safe bounded retries before response streaming, connection pooling, timeouts, bounded concurrency and backpressure. Management is a token-free local demo, protected from cross-origin browser requests; do not expose it to other hosts. The console uses actual instance telemetry and experiment results.
 
 ```mermaid
 flowchart LR

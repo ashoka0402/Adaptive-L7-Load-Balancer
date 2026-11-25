@@ -1,6 +1,6 @@
 # Benchmark API
 
-Authenticated POST /admin/experiments accepts a bounded local specification:
+Local POST /admin/experiments (include `X-Pulse-Local: 1` on mutations) accepts a bounded local specification:
 ```json
 {"mode":"http","algorithms":["round_robin","weighted_round_robin","least_connections","latency_aware"],"rps":50,"duration":3,"concurrency":32,"pattern":"steady","seed":7}
 ```

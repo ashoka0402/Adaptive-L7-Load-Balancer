@@ -1,8 +1,6 @@
 import textwrap
 import time
 
-import pytest
-
 from app.config import CircuitBreakerConfig, load_config
 from app.models.backend import Backend, CircuitState
 from app.proxy import ReverseProxy
@@ -40,12 +38,10 @@ def test_circuit_eligibility_does_not_reserve_unselected_probe():
     assert backend.half_open_in_flight == 1
 
 
-def test_load_config_requires_external_admin_secret(tmp_path, monkeypatch):
+def test_load_config_needs_no_token_and_defaults_to_loopback(tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text(
         textwrap.dedent("""
-            server:
-              admin_token: ""
             backends:
               - id: b1
                 host: localhost
@@ -53,9 +49,4 @@ def test_load_config_requires_external_admin_secret(tmp_path, monkeypatch):
             """),
         encoding="utf-8",
     )
-    monkeypatch.delenv("PULSE_ADMIN_TOKEN", raising=False)
-    with pytest.raises(ValueError, match="PULSE_ADMIN_TOKEN"):
-        load_config(path)
-
-    monkeypatch.setenv("PULSE_ADMIN_TOKEN", "test-secret-token-123")
-    assert load_config(path).server.admin_token == "test-secret-token-123"
+    assert load_config(path).server.host == "127.0.0.1"
