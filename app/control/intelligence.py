@@ -45,19 +45,19 @@ class Intelligence:
         return "default", frozenset()
 
     def observe(self, backend: str, request_class: str, latency: float,
-                success: bool, concurrency: int) -> None:
+                success: bool, concurrency: int, *, now: float | None = None) -> None:
         if not self.config.enabled:
             return
-        now = time.monotonic()
+        now = time.monotonic() if now is None else now
         for name in ("*", request_class):
             key = (backend, name)
             if key not in self.profiles:
                 self.profiles[key] = deque(maxlen=self.config.window_size)
             self.profiles[key].append((now, latency, success, concurrency))
 
-    def observe_client(self, latency: float, success: bool) -> None:
+    def observe_client(self, latency: float, success: bool, *, now: float | None = None) -> None:
         if self.config.enabled:
-            self.client.append((time.monotonic(), latency, success))
+            self.client.append((time.monotonic() if now is None else now, latency, success))
 
     def remove(self, backend: str) -> None:
         self.trends.pop(backend, None)

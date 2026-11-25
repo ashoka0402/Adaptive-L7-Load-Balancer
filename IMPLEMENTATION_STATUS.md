@@ -52,3 +52,9 @@ Status reflects the repository contents, not planned behavior.
 - Added focused regression tests; the GitHub connector cannot execute Python and the local environment cannot clone GitHub. No new test results or performance gains are claimed.
 - Remaining: controlled predictive/reactive comparison, sustainable capacity identification, complete client SLO accounting (admission rejection and some transport errors now captured), forecast calibration, comprehensive recovery/learning tests and validation.
 - Added a reproducible synthetic comparison runner: `python -m benchmarks.compare_predictive --seeds 7 11 23`. It has not been executed here; the simulator currently observes outcomes at dispatch rather than completion.
+
+## Phase 3 implementation (validation pending)
+
+- Added isolated seeded queue simulation, HTTP loopback benchmark runner, scheduled synthetic faults, multi-algorithm arena, sampled simulated shadow comparisons, request trace and replay, authenticated lifecycle/SSE/export APIs and bounded persistence.
+- Added genuine unit and real HTTP integration tests and a GitHub Actions workflow running the full suite and static analysis. Verify the Actions results for actual pass/fail status; no local full-suite run was possible due to blocked GitHub DNS.
+- Remaining: production metadata shadowing, independent adaptive shadow controllers, Docker-separated real benchmarking, OS-level faults, resource overhead, recovery time, statistical intervals/regression detection, saved-run replay/export and full runtime validation. Simulation and real HTTP results are separately labeled.

@@ -82,3 +82,7 @@ See `docs/adr/` for durable decisions and `IMPLEMENTATION_STATUS.md` for verifie
 ## Phase 2: predictive intelligence and Autopilot
 
 See [ADR 0003](docs/adr/0003-predictive-autopilot.md). Bounded trend forecasting, request-class fingerprints and objective-based feedback run in the adaptive controller. The selector uses class multipliers within the eligible set. Authenticated `GET /admin/intelligence` returns predictions, fingerprints, SLO observations and policy history; `PATCH /admin/autopilot` changes objective and feature flags. Demo YAML enables deterministic intelligence and Autopilot; learning remains opt-in.
+
+## Phase 3 experiments
+
+See [Lab and Arena API](docs/experiments.md). The experiment manager owns bounded, isolated runs with deterministic traces, simulated completion events, optional loopback HTTP execution, lifecycle controls and SQLite retention. No experiment accepts external target addresses.

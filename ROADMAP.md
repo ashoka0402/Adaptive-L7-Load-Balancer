@@ -37,3 +37,8 @@ Roadmap order follows risk and evidence, not feature count.
 - Execute the full suite, validate predictive versus reactive policies on identical traces and calibrate forecasts.
 - Measure service curves and account for admission rejections and disconnects in SLOs.
 - Keep online learning disabled until controlled experiments verify safety and benefit.
+
+## Phase 3 follow-up
+
+- Verify GitHub Actions runs; fix failing tests rather than weakening assertions. Extend independent shadow controllers, real benchmark isolation, fault recovery metrics and statistical evaluation.
+- Build the dashboard against the authenticated experiment and intelligence APIs in Phase 4.

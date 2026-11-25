@@ -61,6 +61,7 @@ class TelemetryPipeline:
         queue_depth: int | None = None,
         cpu: float | None = None,
         memory: float | None = None,
+        now: float | None = None,
     ) -> None:
         window = self._window(backend_id)
         if queue_depth is not None:
@@ -69,15 +70,18 @@ class TelemetryPipeline:
             window.cpu = min(1.0, max(0.0, cpu))
         if memory is not None:
             window.memory = min(1.0, max(0.0, memory))
-        window.external_updated_at = time.monotonic()
+        window.external_updated_at = time.monotonic() if now is None else now
 
-    def snapshot(self, backend_id: str, fallback_latency: float = 0.05) -> TelemetrySnapshot:
+    def snapshot(
+        self, backend_id: str, fallback_latency: float = 0.05, *, now: float | None = None
+    ) -> TelemetrySnapshot:
         window = self._windows.get(backend_id)
         if not window:
             return TelemetrySnapshot(fallback_latency, 0.0, 0, None, None, 0)
         samples = len(window.outcomes)
         failures = sum(1 for success in window.outcomes if not success)
-        external_fresh = time.monotonic() - window.external_updated_at <= self.external_ttl
+        current = time.monotonic() if now is None else now
+        external_fresh = current - window.external_updated_at <= self.external_ttl
         return TelemetrySnapshot(
             latency=window.latency_ewma or fallback_latency,
             error_rate=failures / samples if samples else 0.0,

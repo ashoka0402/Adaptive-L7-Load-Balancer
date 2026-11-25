@@ -13,6 +13,8 @@ from app.app_keys import CONFIG_KEY, CONTROLLER_KEY, REGISTRY_KEY, TELEMETRY_KEY
 from app.config import AppConfig
 from app.control.controller import AdaptiveController
 from app.health.active import ActiveHealthChecker
+from app.experiments.manager import ExperimentManager
+from app.experiments.routes import setup_experiment_routes
 from app.health.passive import PassiveHealthMonitor
 from app.metrics import prometheus as metrics
 from app.models.backend import Backend, BackendRegistry
@@ -77,6 +79,7 @@ class LoadBalancerApp:
             except (OSError, sqlite3.Error):
                 logger.exception("persistence unavailable; continuing without policy history")
                 self.store = None
+        self.experiments = ExperimentManager(self.store)
         self.controller = AdaptiveController(
             self.registry, self.telemetry, config.adaptive, self.store
         )
@@ -120,6 +123,7 @@ class LoadBalancerApp:
         self.app[CONTROLLER_KEY] = self.controller
         self.app[TELEMETRY_KEY] = self.telemetry
         setup_admin_routes(self.app)
+        setup_experiment_routes(self.app, self.experiments)
         self.app.router.add_route("*", "/{path:.*}", self.proxy.handle)
 
         self.runner = web.AppRunner(self.app, access_log=None)
@@ -151,6 +155,7 @@ class LoadBalancerApp:
 
     async def stop(self) -> None:
         logger.info("graceful shutdown initiated")
+        await self.experiments.stop()
         self._shutdown.set()
         if self._metrics_task:
             self._metrics_task.cancel()

@@ -143,10 +143,10 @@ class AdaptiveController:
 
     def _project_probabilities(self, target: dict[str, float]) -> dict[str, float]:
         """Project onto a simplex while preserving configured floors and movement bounds."""
-        keys = set(target)
+        keys = sorted(target)
         count = len(keys)
         floor = min(self.config.min_probability, 1.0 / count)
-        same_pool = keys == set(self._snapshot.policies)
+        same_pool = set(keys) == set(self._snapshot.policies)
         lower = {}
         upper = {}
         for key in keys:
@@ -201,7 +201,7 @@ class AdaptiveController:
         if intelligence.config.enabled and now - self._last_intelligence_sample >= self.config.interval:
             self._last_intelligence_sample = now
             for backend in self.registry.list_all():
-                observed = self.telemetry.snapshot(backend.id, backend.average_latency or 0.05)
+                observed = self.telemetry.snapshot(backend.id, backend.average_latency or 0.05, now=now)
                 intelligence.sample(
                     backend.id, now=now, connections=backend.active_connections,
                     queue=observed.queue_depth, capacity=backend.capacity,
@@ -222,7 +222,7 @@ class AdaptiveController:
 
         raw: dict[str, dict[str, float]] = {}
         for backend in backends:
-            observed = self.telemetry.snapshot(backend.id, backend.average_latency or 0.05)
+            observed = self.telemetry.snapshot(backend.id, backend.average_latency or 0.05, now=now)
             resource = max(
                 value for value in (observed.cpu, observed.memory, 0.0) if value is not None
             )

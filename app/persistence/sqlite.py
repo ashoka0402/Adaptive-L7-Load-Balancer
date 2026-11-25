@@ -69,7 +69,18 @@ class SQLiteStore:
                 "INSERT INTO experiment_results(name, created_at, payload) VALUES (?, ?, ?)",
                 (name, time.time(), json.dumps(payload, separators=(",", ":"))),
             )
+            connection.execute("DELETE FROM experiment_results WHERE id NOT IN (SELECT id FROM experiment_results ORDER BY id DESC LIMIT 8)")
             return int(cursor.lastrowid or 0)
+
+    def get_experiment(self, name: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT payload FROM experiment_results WHERE name=? ORDER BY id DESC LIMIT 1", (name,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def recent_experiments(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT name, created_at FROM experiment_results ORDER BY id DESC LIMIT 8").fetchall()
+        return [{"id": row[0], "created_at": row[1]} for row in rows]
 
     def recent_policies(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._connect() as connection:
