@@ -173,7 +173,23 @@ class PersistenceConfig(BaseModel):
     snapshot_limit: int = Field(default=500, ge=1, le=10000)
 
 
+class ShadowConfig(BaseModel):
+    enabled: bool = False
+    sample_every: int = Field(default=100, ge=10, le=10000)
+    queue_limit: int = Field(default=64, ge=1, le=256)
+    algorithms: tuple[Literal["round_robin", "weighted_round_robin", "least_connections", "latency_aware"], ...] = Field(
+        default=("round_robin", "least_connections"), max_length=4
+    )
+
+    @model_validator(mode="after")
+    def unique_algorithms(self) -> ShadowConfig:
+        if len(set(self.algorithms)) != len(self.algorithms):
+            raise ValueError("duplicate shadow algorithm")
+        return self
+
+
 class AppConfig(BaseModel):
+    shadow: ShadowConfig = Field(default_factory=ShadowConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     load_balancing: LoadBalancingConfig = Field(default_factory=LoadBalancingConfig)
     adaptive: AdaptiveConfig = Field(default_factory=AdaptiveConfig)

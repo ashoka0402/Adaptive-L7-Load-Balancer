@@ -1,0 +1,23 @@
+# Separate offline benchmark runner. No network access except its own loopback.
+services:
+  arena:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: 2
+    mem_limit: 512m
+    pids_limit: 128
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./config/lab.http.json:/app/lab.json:ro
+      - ./reports:/reports
+    command: ["python", "-m", "benchmarks.run_arena", "--spec", "/app/lab.json", "--output", "/reports/http-arena.json"]

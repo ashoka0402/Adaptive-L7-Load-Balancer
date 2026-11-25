@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY config/ ./config/
 COPY backends/ ./backends/
+COPY benchmarks/ ./benchmarks/
 
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1

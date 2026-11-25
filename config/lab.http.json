@@ -1,0 +1,43 @@
+{
+  "mode": "http",
+  "algorithms": [
+    "round_robin",
+    "adaptive",
+    "predictive"
+  ],
+  "rps": 50,
+  "duration": 4,
+  "warmup": 1,
+  "concurrency": 24,
+  "repetitions": 2,
+  "pattern": "burst",
+  "nodes": [
+    {
+      "id": "b1",
+      "capacity": 6,
+      "latency_ms": 10
+    },
+    {
+      "id": "b2",
+      "capacity": 10,
+      "latency_ms": 20
+    },
+    {
+      "id": "b3",
+      "capacity": 8,
+      "latency_ms": 30
+    }
+  ],
+  "faults": [
+    {
+      "at": 2,
+      "backend": "b1",
+      "kind": "down"
+    },
+    {
+      "at": 3,
+      "backend": "b1",
+      "kind": "restore"
+    }
+  ]
+}

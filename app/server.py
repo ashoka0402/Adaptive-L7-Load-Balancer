@@ -12,6 +12,7 @@ from app.admin.routes import setup_admin_routes
 from app.app_keys import CONFIG_KEY, CONTROLLER_KEY, REGISTRY_KEY, TELEMETRY_KEY
 from app.config import AppConfig
 from app.control.controller import AdaptiveController
+from app.experiments.live_shadow import LiveShadow
 from app.experiments.manager import ExperimentManager
 from app.experiments.routes import setup_experiment_routes
 from app.health.active import ActiveHealthChecker
@@ -80,6 +81,7 @@ class LoadBalancerApp:
                 logger.exception("persistence unavailable; continuing without policy history")
                 self.store = None
         self.experiments = ExperimentManager(self.store)
+        self.shadow = LiveShadow(config.shadow)
         self.controller = AdaptiveController(
             self.registry, self.telemetry, config.adaptive, self.store
         )
@@ -100,6 +102,7 @@ class LoadBalancerApp:
     async def start(self) -> None:
         await self.pool.start()
         await self.controller.start()
+        self.shadow.start()
         self.health_checker = ActiveHealthChecker(
             self.registry, self.config.health_check, self.pool.session
         )
@@ -115,6 +118,7 @@ class LoadBalancerApp:
             self.passive,
             self.backpressure,
             self.telemetry,
+            self.shadow,
         )
 
         self.app = web.Application(client_max_size=self.config.request.max_body_size)
@@ -123,7 +127,7 @@ class LoadBalancerApp:
         self.app[CONTROLLER_KEY] = self.controller
         self.app[TELEMETRY_KEY] = self.telemetry
         setup_admin_routes(self.app)
-        setup_experiment_routes(self.app, self.experiments)
+        setup_experiment_routes(self.app, self.experiments, self.shadow)
         self.app.router.add_route("*", "/{path:.*}", self.proxy.handle)
 
         self.runner = web.AppRunner(self.app, access_log=None)
@@ -156,6 +160,7 @@ class LoadBalancerApp:
     async def stop(self) -> None:
         logger.info("graceful shutdown initiated")
         await self.experiments.stop()
+        await self.shadow.stop()
         self._shutdown.set()
         if self._metrics_task:
             self._metrics_task.cancel()

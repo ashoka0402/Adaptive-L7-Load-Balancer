@@ -17,6 +17,7 @@ from app.routing.adaptive import AdaptiveStrategy
 
 if TYPE_CHECKING:
     from app.config import AppConfig
+    from app.experiments.live_shadow import LiveShadow
     from app.health.passive import PassiveHealthMonitor
     from app.models.backend import Backend, BackendRegistry
     from app.pool.connection_pool import ConnectionPool
@@ -55,6 +56,7 @@ class ReverseProxy:
         passive: PassiveHealthMonitor,
         backpressure: BackpressureController,
         telemetry: TelemetryPipeline,
+        shadow: LiveShadow | None = None,
     ) -> None:
         self.config = config
         self.registry = registry
@@ -65,6 +67,7 @@ class ReverseProxy:
         self.passive = passive
         self.backpressure = backpressure
         self.telemetry = telemetry
+        self.shadow = shadow
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
         # Metrics path short-circuit
@@ -233,6 +236,8 @@ class ReverseProxy:
             policy = self.strategy.policy_for(selected.id)
             if policy:
                 ctx.routing_reason = f"{policy.explanation}; class={ctx.request_class}"
+        if selected is not None and self.shadow is not None:
+            self.shadow.observe(selected, candidates)
         return selected
 
     async def _forward(

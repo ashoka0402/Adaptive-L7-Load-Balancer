@@ -141,3 +141,9 @@ python benchmarks/compare_routing.py --seed 7 \
 Pulse is an engineering platform, not a replacement for a mature edge proxy. It currently has single-process state, buffered request bodies, no TLS termination or service discovery, shared-token operations authentication, and no backend destination allowlist. SQLite policy history is local to one instance.
 
 Licensed under MIT.
+
+## Verification and experiment lab
+
+[![Pulse verification](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions/workflows/verify.yml/badge.svg)](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions/workflows/verify.yml)
+
+GitHub Actions executes the full test suite on Python 3.12/3.13, Ruff, mypy, and an actual seeded Arena simulation; reports are downloadable as workflow artifacts. See [Lab, Chaos, Arena and Replay](docs/experiments.md) for API and isolated benchmark instructions.

@@ -42,3 +42,11 @@ Use GitHub Actions "Pulse verification" for actual pytest, coverage, lint and ty
 check outcomes. No test or benchmark results are fabricated.
 
 Run `python -m benchmarks.run_arena --spec experiment.json --output arena.json` or omit `--spec` for the default comparison. CI executes the default simulation and uploads actual result JSON alongside the test reports.
+
+## Opt-in live shadowing
+
+Configure `shadow.enabled: true`, `sample_every: 100` and a bounded `queue_limit` in the server YAML. `GET /admin/shadow` returns decision disagreement and observational latency/error deltas for baseline candidate strategies. Only copied routing statistics are retained in memory; no request payload, headers, URL, address, or duplicate traffic is collected. This is not a causal prediction of a different routing policy's performance.
+
+## Network-isolated Docker benchmark
+
+Run `mkdir -p reports && docker compose -f docker-compose.lab.yml run --rm arena`. The runner has no external network, no extra capabilities, a read-only container filesystem, and resource limits. It creates ephemeral loopback proxy/backend listeners inside one container. Results are written to `reports/http-arena.json`. The compose run itself has not been validated in this environment.
