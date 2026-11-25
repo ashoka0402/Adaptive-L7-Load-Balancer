@@ -1,9 +1,5 @@
 # Implementation status
 
-Current scope: conventional asynchronous Layer 7 load balancing with Round Robin, Weighted Round Robin, Least Connections and EWMA. Essential health, reliability, connection reuse, timeouts and backpressure are retained. Two-page Dashboard and Battle Arena provide a simple demonstration of real traffic and labeled isolated benchmarks.
+FastAPI is the default entrypoint. The Python port provides eight routing strategies, route prefix matching, pooled HTTP forwarding, fixed admission, bounded safe-method retries, active health checks, circuit breakers, SSE metrics, real HTTP traffic generation, local backend controls, theme switching and a real HTTP comparison arena. Legacy aiohttp code, tests and historic measurements are retained separately from the active runtime. The upstream MIT notice is retained.
 
-Removed from runtime and UI: multidimensional adaptive scoring, predictive congestion routing, dynamic capacity estimation, request-class routing, backend fingerprints, Autopilot, SLO policy optimization, contextual learning, policy rollback, exploratory traffic and routing explanations. Shadow routing was also removed. The older simulator and adaptive-specific tests/benchmarks have been removed; historical Git commits retain their evidence.
-
-Verification: check the Actions run for the exact commit. No test passes or new performance claims are made before the run completes. Previous version results do not establish the performance of this version.
-
-Remaining limitations: single process; request bodies buffered; trusted network and DNS assumptions; runtime-only configuration; synthetic benchmark backends; no native TLS/HTTP2 or WebSocket support.
+Not ported: Redis/shared rate limits, multiprocess clustering, hedged requests, adaptive admission and automatic infrastructure scaling. New tests are provided; runtime and benchmark results must be verified by running the commands in README. No historical performance claims apply to this version.

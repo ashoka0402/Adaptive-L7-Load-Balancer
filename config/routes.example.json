@@ -1,0 +1,11 @@
+{
+  "routes": [
+    {"prefix": "/users", "strategy": "round_robin", "backends": [
+      {"id": "users-a", "url": "http://127.0.0.1:8001"},
+      {"id": "users-b", "url": "http://127.0.0.1:8002", "weight": 2}
+    ]},
+    {"prefix": "/posts", "strategy": "latency_aware", "backends": [
+      {"id": "posts-a", "url": "http://127.0.0.1:8003"}
+    ]}
+  ]
+}

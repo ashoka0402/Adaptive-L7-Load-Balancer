@@ -1,103 +1,39 @@
-"""CLI entrypoint for Pulse."""
-
+"""Default FastAPI CLI; the previous aiohttp runtime is available via --legacy."""
 from __future__ import annotations
 
 import argparse
-import asyncio
-import logging
-import signal
 import sys
+from pathlib import Path
 
-from app.config import load_config
-from app.logging.structured import setup_logging
-from app.server import LoadBalancerApp
+import yaml
 
-logger = logging.getLogger(__name__)
+import uvicorn
 
-
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Pulse — HTTP Load Balancer",
-    )
-    p.add_argument(
-        "-c",
-        "--config",
-        default="config/config.yaml",
-        help="Path to YAML configuration file",
-    )
-    p.add_argument(
-        "--host",
-        default=None,
-        help="Override server host",
-    )
-    p.add_argument(
-        "--port",
-        type=int,
-        default=None,
-        help="Override server port",
-    )
-    p.add_argument(
-        "--strategy",
-        default=None,
-        choices=[
-            "round_robin",
-            "weighted_round_robin",
-            "least_connections",
-            "latency_aware",
-        ],
-        help="Override load-balancing strategy",
-    )
-    return p.parse_args()
-
-
-async def run(config_path: str, host=None, port=None, strategy=None) -> None:
-    config = load_config(config_path)
-    if host:
-        config.server.host = host
-    if port:
-        config.server.port = port
-    if strategy:
-        config.load_balancing.strategy = strategy
-
-    setup_logging(config.logging.level, config.logging.format)
-
-    app = LoadBalancerApp(config)
-    await app.start()
-
-    loop = asyncio.get_running_loop()
-    stop_event = asyncio.Event()
-
-    def _signal_handler() -> None:
-        logger.info("signal received, shutting down")
-        stop_event.set()
-
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
-            loop.add_signal_handler(sig, _signal_handler)
-        except NotImplementedError:
-            # Windows
-            signal.signal(sig, lambda s, f: _signal_handler())
-
-    await stop_event.wait()
-    await app.stop()
+from app.fastapi_lb.routing import STRATEGIES
+from app.fastapi_lb.server import create_app
 
 
 def main() -> None:
-    args = parse_args()
-    try:
-        asyncio.run(
-            run(
-                args.config,
-                host=args.host,
-                port=args.port,
-                strategy=args.strategy,
-            )
-        )
-    except KeyboardInterrupt:
-        pass
-    except Exception:
-        logger.exception("fatal error")
-        sys.exit(1)
+    if "--legacy" in sys.argv:
+        sys.argv.remove("--legacy")
+        from app.legacy_main import main as legacy_main
+        legacy_main()
+        return
+    parser = argparse.ArgumentParser(description="Pulse FastAPI load balancer")
+    parser.add_argument("-c", "--config", default=None, help="Optional JSON/YAML routes")
+    parser.add_argument("--host", default=None)
+    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--strategy", choices=STRATEGIES)
+    args = parser.parse_args()
+    settings = {}
+    if args.config:
+        settings = yaml.safe_load(Path(args.config).read_text(encoding="utf-8")).get("server", {})
+    host = args.host or settings.get("host", "127.0.0.1")
+    port = args.port if args.port is not None else int(settings.get("port", 8080))
+    if not 1 <= port <= 65535:
+        parser.error("port must be between 1 and 65535")
+    uvicorn.run(create_app(args.config, port, args.strategy),
+                host=host, port=port, workers=1, proxy_headers=False)
 
 
 if __name__ == "__main__":

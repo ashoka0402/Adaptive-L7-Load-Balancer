@@ -1,63 +1,66 @@
 # Pulse — Layer 7 Load Balancer
 
-A focused Python asyncio project that demonstrates HTTP reverse proxying, routing algorithms, backend health, fault tolerance and real performance measurement. Built for learning and technical interviews, not marketed as a production replacement for NGINX or AWS.
+A recruiter-friendly systems engineering lab, refactored around FastAPI, asynchronous HTTP forwarding and the signal-router dashboard from [codedpool/load-balancer](https://github.com/codedpool/load-balancer) (MIT, see [notice](LICENSES/codedpool-MIT.txt)). The original Node architecture is the basis for the Python port; not every upstream feature is ported. The full upstream text source is preserved in [reference/codedpool](reference/codedpool), pinned to commit 5da9ed5caa02b9e4adc0aef5fc0cbff4acac9362; four binary screenshots are omitted. The previous aiohttp implementation remains available for historical tests and comparisons.
 
-## Run locally
+## Quick start
 
-Start Docker Desktop and run from the repository in PowerShell:
-
-```powershell
-docker compose up --build -d load-balancer
+```bash
+python -m pip install -r requirements.txt
+python -m app.main
 ```
 
-Open **http://localhost:8080/pulse/**; the dashboard connects automatically. If port 8080 is occupied, set `$env:PULSE_PORT = "8081"` before starting Compose and open port 8081 instead. The internal container port stays 8080.
+Open http://127.0.0.1:8080/pulse/. Four actual loopback HTTP backends start automatically. No admin token or external services are needed. Start a bounded traffic test, change algorithms while it runs, take backends offline, add up to two new servers, or compare algorithms in the Battle Arena.
 
-To start optional Prometheus and Grafana, set a unique `GRAFANA_ADMIN_PASSWORD` (Grafana has its own login), then run `docker compose up -d prometheus grafana`. Stop the demo with `docker compose down`.
+Docker: `docker compose up --build -d load-balancer`. Optional Prometheus and Grafana are available via the existing Compose services. The management interface is a local demo, not authenticated; never publish it to the internet.
 
-## Two screens
-
-- **Dashboard:** switch the real routing algorithm, see request counts, throughput, latency percentiles, errors, backend health, active connections, queue pressure and distribution; generate bounded paced or unpaced HTTP traffic and disable/re-enable backends.
-- **Battle Arena:** compare all four algorithms using the same seeded workload. Choose real local HTTP or labeled queue simulation. View throughput, latency, errors and backend distribution. Choose normal, slow backend, outage/recovery or limited capacity scenarios. Dark and light themes are available.
-
-## Four routing algorithms
-
-| Algorithm | How it works |
-| --- | --- |
-| Round Robin | Rotate across available backends |
-| Weighted Round Robin | Smooth distribution in configured weight proportions |
-| Least Connections | Select the fewest active upstream requests |
-| EWMA | Prefer lower measured latency with a simple load penalty |
-
-Core reliability includes active/passive health checks, circuit breakers, safe bounded retries before response streaming, connection pooling, timeouts, bounded concurrency and backpressure. Management is a token-free local demo, protected from cross-origin browser requests; do not expose it to other hosts. The console uses actual instance telemetry and experiment results.
+## Architecture
 
 ```mermaid
 flowchart LR
-    Client --> Proxy[Async HTTP proxy]
-    Proxy --> Admission[Bounded admission]
-    Admission --> Router[Selected routing algorithm]
-    Router --> B1[Backend 1]
-    Router --> B2[Backend 2]
-    Router --> B3[Backend 3]
-    B1 --> Health[Health and metrics]
-    B2 --> Health
-    B3 --> Health
-    Health --> Router
-    Health --> Dashboard[Dashboard]
+  Client --> FastAPI
+  FastAPI --> Admission[Fixed admission + retry budget]
+  Admission --> Trie[Longest-prefix route trie]
+  Trie --> Pool[Selectable backend pool]
+  Pool --> HTTPX[Async pooled HTTP client]
+  HTTPX --> A[Backend A]
+  HTTPX --> B[Backend B]
+  HTTPX --> C[Backend C]
+  A --> Telemetry
+  B --> Telemetry
+  C --> Telemetry
+  Telemetry --> SSE[Live dashboard]
+  Telemetry --> Prometheus
 ```
+
+| Algorithm | Selection |
+| --- | --- |
+| Round robin | Rotate through eligible nodes |
+| Weighted round robin | Smooth weighted rotation |
+| Least connections | Fewest in-flight requests |
+| Least latency | Minimum measured EWMA |
+| Least loaded | Active requests plus latency score |
+| Power of two | Choose the better of two random eligible nodes |
+| IP hash | Stable hash of client IP against current eligible list |
+| Latency aware | EWMA × (1 + active requests), with cold-start and periodic exploration |
+
+The dashboard displays request throughput, p50/p95/p99, recent error rate, backend share, health, circuit state and activity using bounded samples. Animated dots represent measured aggregate traffic share, not an individual request trace. The arena sends 240 real HTTP requests per algorithm with the same worker count and reports measured throughput, p95 and success. It is a local demonstration, not a controlled production benchmark; results depend on scheduling, connection reuse and current health.
+
+## Structured code
+
+- `app/fastapi_lb/server.py`: FastAPI lifespan, SSE, health probes, control endpoints.
+- `app/fastapi_lb/routing.py`: segment trie, backend state, circuit and strategy selection.
+- `app/fastapi_lb/proxy.py`: HTTPX forwarding, bounded request bodies, fixed concurrency shedding and GET/HEAD retries.
+- `app/fastapi_lb/lab.py`: real local demo backends, load and arena.
+- `app/fastapi_lb/telemetry.py`: bounded measurements.
+- `app/fastapi_lb/dashboard.html`: adapted upstream UI, with theme, metrics and arena.
+
+To proxy your own locally configured HTTP services, run `python -m app.main --config config/routes.example.json`. Define route prefixes and trusted origins in a JSON/YAML file. The console reports all pools; the strategy selector changes the first configured pool. Demo traffic, server creation and toggles are disabled in configured mode. The route paths are forwarded unchanged. Use `--legacy` to run the previous aiohttp CLI.
 
 ## Verification
 
 ```bash
-python -m pip install -e '.[dev]'
+python -m pytest tests/unit/test_fastapi_routing.py tests/integration/test_fastapi_lab.py -q
 python -m pytest -ra
-ruff check .
-mypy app
-node --test frontend_tests/model.test.mjs
-python -m benchmarks.run_arena --output reports/arena.json
 ```
 
-[GitHub Actions](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions) runs Python tests, type checking, Chromium browser tests, a real HTTP benchmark and Docker smoke checks. The browser artifact contains actual screenshots. No performance result is assumed.
-
-[Architecture](ARCHITECTURE.md) · [Demo guide](docs/demo.md) · [Benchmark methodology](docs/benchmarks/README.md) · [Interview guide](docs/interview.md) · [Security and limits](docs/release.md)
-
-The earlier experimental adaptive intelligence engine was intentionally removed. Its source and historical measurements remain available in Git history. EWMA remains a conventional feedback-based routing algorithm, not an AI or predictive controller.
+No new performance numbers are claimed. Fixed concurrency shedding replaces the upstream adaptive limiter. Redis rate limiting, multiprocess cluster coordination, hedged requests and automatic infrastructure autoscaling are not ported; server creation is manual and local. HTTPS upstreams use normal certificate validation. WebSocket upgrades are not supported. Historical benchmark files relate to the legacy implementation, not the FastAPI port.

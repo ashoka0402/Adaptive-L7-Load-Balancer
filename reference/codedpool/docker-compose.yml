@@ -1,0 +1,82 @@
+# One-command full stack:  docker-compose up --build
+#
+# Two ways to see the system, both included:
+#   dashboard  -> live interactive demo (self-contained)   http://localhost:3000
+#   lb         -> the real proxy you push traffic through   http://localhost:8080
+#                 observed by Prometheus + Grafana below
+#
+#   user1..post2 -> mock backend services behind lb
+#   redis        -> shared store for distributed rate limiting
+#   prometheus   -> scrapes lb:8080/metrics                 http://localhost:9090
+#   grafana      -> dashboards (admin/admin)                http://localhost:3001
+services:
+  # Self-contained interactive dashboard — boots its own balancer + backends.
+  # This is the screen you open and click "Run Test" on.
+  dashboard:
+    build: .
+    command: node src/dashboard.js
+    environment:
+      - PORT=3000
+    # Host port is overridable (DASHBOARD_PORT=3010 docker compose up) in case
+    # something local already holds 3000.
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+
+  lb:
+    build: .
+    command: node src/server.js
+    ports:
+      - "8080:8080"
+      - "8090:8090"
+    environment:
+      - ROUTES_PATH=/app/routes.docker.json
+      - REDIS_URL=redis://redis:6379
+      - ADMIN_TOKEN=demo-token
+      - ADAPTIVE_CONCURRENCY=true
+    depends_on: [user1, user2, user3, post1, post2, redis]
+
+  user1:
+    build: .
+    command: node mock_servers/backend_user1.js
+  user2:
+    build: .
+    command: node mock_servers/backend_user2.js
+  user3:
+    build: .
+    command: node mock_servers/backend_user3.js
+  post1:
+    build: .
+    command: node mock_servers/backend_post1.js
+  post2:
+    build: .
+    command: node mock_servers/backend_post2.js
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    depends_on: [lb]
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    depends_on: [prometheus]
+
+volumes:
+  grafana-storage:

@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pulse — L7 signal router</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f1c20'/%3E%3Ccircle cx='9' cy='16' r='2.4' fill='%23ece6d8'/%3E%3Ccircle cx='22' cy='9' r='2.4' fill='%23c9a24b'/%3E%3Ccircle cx='22' cy='23' r='2.4' fill='%23c9a24b'/%3E%3Cpath d='M11 15 19 10M11 17 19 22' stroke='%23c9a24b' stroke-width='1.6' fill='none'/%3E%3C/svg%3E" />
+<style>
+  :root {
+    --cream: #ece6d8; --muted: #94a39b; --muted2: #5e6f69;
+    --panel: #13262a; --raise: #193035;
+    --line: rgba(236,230,216,.10); --line2: rgba(236,230,216,.055);
+    --brass: #c9a24b; --brass2: #b5893a;
+    --ok: #6fb58a; --down: #c8705e;
+    --shadow: 0 22px 50px -34px rgba(0,0,0,.85);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; height: 100vh; overflow: hidden; color: var(--cream);
+    font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    background: radial-gradient(135% 120% at 50% -8%, #17302f, #0b1417 70%);
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  .serif { font-family: "Fraunces", Georgia, serif; }
+  .lab { font: 500 9.5px/1 "IBM Plex Mono", monospace; letter-spacing: .24em; text-transform: uppercase; color: var(--muted2); }
+
+  .app { height: 100vh; display: flex; flex-direction: column; animation: rise .6s cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  /* ---- header ---- */
+  .bar { display: flex; align-items: center; gap: 20px; padding: 17px 28px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .brand { display: flex; align-items: baseline; gap: 14px; }
+  .wordmark { font: 500 25px "Fraunces", serif; letter-spacing: .005em; color: var(--cream); }
+  .wordmark b { color: var(--brass); font-weight: 500; }
+  .sub { font: 500 10px "IBM Plex Mono", monospace; letter-spacing: .26em; text-transform: uppercase; color: var(--muted2); }
+  .grow { flex: 1; }
+  .status { display: flex; align-items: center; gap: 9px; font: 500 12px "IBM Plex Mono", monospace; color: var(--muted); }
+  .status .tick { width: 7px; height: 7px; border-radius: 50%; background: var(--muted2); }
+  .status .tick.on { background: var(--brass); }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  select {
+    font: 500 12.5px "IBM Plex Mono", monospace; color: var(--cream); cursor: pointer;
+    background: var(--raise); border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px;
+    transition: border-color .15s ease;
+  }
+  select:hover { border-color: rgba(236,230,216,.28); }
+  select:focus-visible, .run:focus-visible, .port:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .run {
+    font: 600 13px "IBM Plex Mono", monospace; letter-spacing: .08em; text-transform: uppercase; color: #1b1408;
+    background: var(--brass); border: none; border-radius: 5px; padding: 11px 24px; cursor: pointer;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.28); transition: background .15s ease, transform .08s ease;
+  }
+  .run:hover { background: #d8b057; }
+  .run:active { transform: translateY(1px); }
+  .run.stop { background: transparent; color: var(--down); box-shadow: inset 0 0 0 1px rgba(200,112,94,.55); }
+
+  /* ---- readouts ---- */
+  .readouts { display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid var(--line); }
+  .ro { padding: 18px 28px; border-right: 1px solid var(--line2); position: relative; }
+  .ro:last-child { border-right: none; }
+  .ro .rv { display: block; margin-top: 12px; font: 500 36px/1 "Fraunces", serif; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .ro .rv i { font: 400 12px "IBM Plex Mono", monospace; font-style: normal; color: var(--muted2); margin-left: 6px; }
+  .ro.live .rv { color: var(--brass); }
+  .ro.live::after { content: ""; position: absolute; left: 28px; bottom: -1px; width: 28px; height: 2px; background: var(--brass); }
+
+  /* ---- stage ---- */
+  .stage { flex: 1; min-height: 0; display: grid; grid-template-columns: 1.7fr 1fr; }
+  .bay { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+  .graphwrap { position: relative; flex: 1; min-height: 0; }
+  canvas#graph { display: block; width: 100%; height: 100%; }
+  .armed { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 24px; pointer-events: none;
+    font: 500 10.5px "IBM Plex Mono", monospace; letter-spacing: .24em; text-transform: uppercase; color: var(--muted2); transition: opacity .5s ease; }
+  .scopebar { flex: none; display: flex; align-items: center; gap: 18px; padding: 14px 28px; border-top: 1px solid var(--line); }
+  .scopebar .lab { flex: none; }
+  canvas#scope { display: block; width: 100%; height: 44px; flex: 1; }
+
+  /* ---- rail ---- */
+  .rail { display: flex; flex-direction: column; min-height: 0; gap: 16px; padding: 18px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); display: flex; flex-direction: column; min-height: 0; }
+  .ph { display: flex; align-items: baseline; justify-content: space-between; padding: 16px 18px 13px; border-bottom: 1px solid var(--line2); }
+  .ph .t { font: 600 11px "IBM Plex Mono", monospace; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); }
+  .ph .hint { font: 400 10px "IBM Plex Mono", monospace; color: var(--muted2); }
+  .ports { flex: none; }
+  .list { padding: 12px; }
+  .port {
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; width: 100%;
+    text-align: left; color: inherit; font: inherit; cursor: pointer; margin-bottom: 8px;
+    background: var(--raise); border: 1px solid var(--line2); border-radius: 6px; padding: 13px 15px;
+    transition: border-color .14s ease, background .14s ease, opacity .25s ease;
+  }
+  .port:last-child { margin-bottom: 0; }
+  .port:hover { border-color: rgba(236,230,216,.24); background: #1d3539; }
+  .port.dead { opacity: .5; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .dot.g { background: var(--ok); } .dot.a { background: var(--brass); } .dot.r { background: var(--down); }
+  .pname { font: 500 14px "Fraunces", serif; color: var(--cream); }
+  .pmeta { font: 400 11px "IBM Plex Mono", monospace; color: var(--muted); margin-top: 3px; }
+  .pright { text-align: right; }
+  .pshare { font: 500 19px "Fraunces", serif; font-variant-numeric: tabular-nums; }
+  .pshare s { font: 400 11px "IBM Plex Mono", monospace; text-decoration: none; color: var(--muted2); }
+  .pbar { height: 3px; width: 70px; margin: 7px 0 0 auto; background: rgba(236,230,216,.10); overflow: hidden; }
+  .pbar > i { display: block; height: 100%; background: var(--brass); transition: width .5s ease; }
+  .pstate { font: 500 9px "IBM Plex Mono", monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--muted2); margin-top: 7px; }
+
+  .console { flex: 1; min-height: 0; }
+  .feed { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 18px 14px; font: 400 12px/1.85 "IBM Plex Mono", monospace;
+    scrollbar-width: thin; scrollbar-color: rgba(236,230,216,.18) transparent; }
+  .feed::-webkit-scrollbar { width: 8px; }
+  .feed::-webkit-scrollbar-thumb { background: rgba(236,230,216,.14); border-radius: 8px; }
+  .feed .row { display: flex; gap: 12px; }
+  .feed .ts { color: var(--muted2); flex: none; }
+  .feed .m.good { color: var(--ok); } .feed .m.bad { color: var(--down); } .feed .m.info { color: var(--muted); }
+  .feed .empty { color: var(--muted2); }
+
+  @media (max-width: 880px) {
+    html, body { height: auto; overflow: auto; }
+    .app { height: auto; min-height: 100vh; }
+    .stage { grid-template-columns: 1fr; }
+    .bay { border-right: none; border-bottom: 1px solid var(--line); }
+    .graphwrap { height: 320px; flex: none; }
+    .readouts { grid-template-columns: repeat(2, 1fr); }
+    .ro:nth-child(odd) { border-right: 1px solid var(--line2); }
+  }
+  @media (prefers-reduced-motion: reduce) { .app { animation: none; } }
+
+  .readouts { grid-template-columns: repeat(6,1fr); }
+  .secondary { background:var(--raise); color:var(--cream); border:1px solid var(--line); border-radius:5px; padding:8px 11px; cursor:pointer; font:inherit; font-size:11px; }
+  .secondary:disabled, .run:disabled { opacity:.45; cursor:not-allowed; }
+  .rail { overflow-y:auto; } .console { min-height:120px; }
+  .graphwrap { min-height:320px; }
+  .scopebar { padding:9px 24px; } .scopebar canvas { width:100%; height:32px; flex:1; min-width:0; }
+  .arena-result { padding:12px 16px; color:var(--muted); font-size:11px; line-height:1.65; overflow-x:auto; }
+  .arena-result table { width:100%; border-collapse:collapse; text-align:right; white-space:nowrap; }
+  .arena-result td,.arena-result th { padding:5px; border-bottom:1px solid var(--line); }
+  .arena-result td:first-child,.arena-result th:first-child { text-align:left; }
+  body.light { --cream:#253b3d; --muted:#526662; --muted2:#61736b; --panel:#f7f5ed; --raise:#e7eae1; --line:rgba(37,59,61,.19); --line2:rgba(37,59,61,.09); --brass:#946b23; --ok:#286f4b; --down:#a54436; --shadow:0 10px 35px -24px #777; background:#eeeee5; }
+  body.light .port:hover { background:#dce3d9; } body.light .run { color:white; }
+  @media(max-width:1100px) { .readouts { grid-template-columns:repeat(3,1fr); } html,body { height:auto; overflow:auto; } .app { height:auto; min-height:100vh; } .stage { min-height:700px; } }
+  @media(max-width:880px) { .readouts { grid-template-columns:repeat(2,1fr); } .stage { min-height:0; } .graphwrap { min-height:320px; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand">
+      <span class="wordmark serif">Pulse<b>.</b></span>
+      <span class="sub">L7 signal router</span>
+    </div>
+    <div class="grow"></div>
+    <div class="status"><span class="tick" id="tick"></span><span id="statusText">idle</span></div>
+    <label class="field"><span class="lab">routing</span>
+      <select id="strategy" title="Switch the balancing strategy live">
+        <option value="round_robin">round robin</option>
+        <option value="weighted_round_robin">weighted round robin</option>
+        <option value="least_latency">least latency</option>
+        <option value="least_connections">least connections</option>
+        <option value="latency_aware">latency aware (EWMA + load)</option>
+        <option value="least_loaded">least loaded</option>
+        <option value="p2c">power of two</option>
+        <option value="ip_hash">ip hash</option>
+      </select>
+    </label>
+    <label class="field"><span class="lab">workers</span><select id="workers"><option>4</option><option>12</option><option selected>24</option><option>48</option></select></label><button type="button" class="run" id="run">Run test</button><button class="secondary" id="theme" type="button">Light mode</button>
+  </header>
+
+  <section class="readouts">
+    <div class="ro live"><span class="lab">throughput</span><span class="rv serif" id="rps">0<i>req/s</i></span></div>
+    <div class="ro"><span class="lab">latency p50</span><span class="rv serif" id="p50">0<i>ms</i></span></div>
+    <div class="ro"><span class="lab">latency p95</span><span class="rv serif" id="p95">0<i>ms</i></span></div><div class="ro"><span class="lab">latency p99</span><span class="rv serif" id="p99">0<i>ms</i></span></div>
+    <div class="ro"><span class="lab">success</span><span class="rv serif" id="success">100<i>%</i></span></div>
+    <div class="ro"><span class="lab">requests</span><span class="rv serif" id="total">0</span></div>
+  </section>
+
+  <main class="stage">
+    <div class="bay">
+      <div class="graphwrap">
+        <canvas id="graph"></canvas>
+        <div class="armed" id="armed">press run to send traffic through the router</div>
+      </div>
+      <div class="scopebar"><span class="lab">throughput</span><canvas id="scope"></canvas></div><div class="scopebar"><span class="lab">p95 latency</span><canvas id="latencyScope"></canvas></div><div class="scopebar"><span class="lab">error rate</span><canvas id="errorScope"></canvas></div>
+    </div>
+    <aside class="rail">
+      <div class="panel ports">
+        <div class="ph"><span class="t">Backend ports</span><button class="secondary" id="add" type="button">+ Server</button></div>
+        <div class="list" id="ports"></div>
+      </div>
+      <div class="panel"><div class="ph"><span class="t">Battle arena</span><button class="secondary" id="arena" type="button">Compare</button></div><div id="arenaResult" class="arena-result">Same request count and worker count for each algorithm.</div></div><div class="panel console">
+        <div class="ph"><span class="t">Activity</span></div>
+        <div class="feed" id="feed"><div class="empty">awaiting traffic…</div></div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+  const STRAT_LABEL = {
+    round_robin: 'round robin', weighted_round_robin: 'weighted rr',
+    least_latency: 'least latency', least_connections: 'least connections', latency_aware: 'EWMA + load',
+    least_loaded: 'least loaded', p2c: 'power of two', ip_hash: 'ip hash',
+  };
+  const C = { brass: '#c9a24b', cream: '#ece6d8', mut: '#94a39b', mut2: '#5e6f69',
+              ok: '#6fb58a', down: '#c8705e', line: 'rgba(236,230,216,.08)' };
+  const $ = (id) => document.getElementById(id);
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let latest = null, running = false, portRects = [], syncedSelect = false;
+
+  function dotClass(b) {
+    if (b.dead || !b.alive || b.breaker === 'open') return 'r';
+    if (b.breaker === 'half_open') return 'a';
+    return 'g';
+  }
+  function stateText(b) {
+    if (b.dead) return 'offline';
+    if (!b.alive) return 'unreachable';
+    return b.breaker === 'half_open' ? 'recovering' : b.breaker === 'open' ? 'ejected' : 'in service';
+  }
+
+  function renderDOM(s) {
+    running = s.running;
+    $('tick').className = 'tick' + (running ? ' on' : '');
+    $('statusText').textContent = running ? `streaming · ${s.workers} workers · ${s.elapsed}s` : 'idle';
+    $('run').textContent = running ? 'Stop test' : 'Run test';
+    $('run').className = 'run' + (running ? ' stop' : '');
+    $('armed').style.opacity = running ? '0' : '1';
+    if (!syncedSelect) { $('strategy').value = s.strategy; syncedSelect = true; }
+
+    $('rps').innerHTML = s.rps + '<i>req/s</i>';
+    $('p50').innerHTML = s.p50 + '<i>ms</i>';
+    $('p95').innerHTML = s.p95 + '<i>ms</i>';
+    $('p99').innerHTML = s.p99 + '<i>ms</i>';
+    const sc = s.successPct >= 99.9 ? C.ok : s.successPct >= 95 ? C.brass : C.down;
+    $('success').innerHTML = `<span style="color:${sc}">${s.successPct}</span><i>%</i>`;
+    $('total').textContent = s.totals.total.toLocaleString();
+
+    $('ports').innerHTML = s.backends.map((b) =>
+      `<button type="button" class="port ${b.dead ? 'dead' : ''}" onclick="toggle('${b.id}')" aria-label="${b.label}, ${stateText(b)}. Click to ${b.dead ? 'restore' : 'take offline'}.">
+        <span class="dot ${dotClass(b)}"></span>
+        <span><span class="pname">${b.label}</span><span class="pmeta">${b.active} in-flight · ${b.latency} ms</span></span>
+        <span class="pright"><span class="pshare">${b.share}<s>%</s></span><span class="pbar"><i style="width:${b.share}%"></i></span><span class="pstate">${stateText(b)}</span></span>
+      </button>`
+    ).join('');
+
+    $('feed').innerHTML = s.events.length
+      ? s.events.slice().reverse().map((e) =>
+          `<div class="row"><span class="ts">${new Date(e.ts).toTimeString().slice(0,8)}</span><span class="m ${e.kind}">${e.msg}</span></div>`
+        ).join('')
+      : '<div class="empty">awaiting traffic…</div>';
+
+    drawScope(s.series.rps); drawScope(s.series.p95, 'latencyScope', C.ok); drawScope(s.series.errors, 'errorScope', C.down);
+    $('run').disabled = s.arenaRunning || !s.demo; $('strategy').disabled = s.arenaRunning; $('workers').disabled = s.running || s.arenaRunning; $('add').disabled = s.arenaRunning || !s.demo || s.backends.length >= 6; $('arena').disabled = !s.demo || s.running || s.arenaRunning;
+    if (s.arenaRunning) $('arenaResult').textContent = 'Running real HTTP comparison…';
+    else if (s.arena && s.arena.length) $('arenaResult').innerHTML = '<table><thead><tr><th>Algorithm</th><th>req/s</th><th>p95 ms</th><th>OK %</th></tr></thead><tbody>' + s.arena.map(r => '<tr><td>'+r.strategy+'</td><td>'+r.rps+'</td><td>'+r.p95+'</td><td>'+r.successPct+'</td></tr>').join('') + '</tbody></table>';
+    $('strategy').value = s.strategy;
+  }
+
+  // ---------- canvas helpers ----------
+  function fit(c, h) {
+    const dpr = window.devicePixelRatio || 1, w = c.clientWidth, hh = h || c.clientHeight;
+    if (c.width !== Math.round(w*dpr) || c.height !== Math.round(hh*dpr)) { c.width = Math.round(w*dpr); c.height = Math.round(hh*dpr); }
+    const x = c.getContext('2d'); x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { x, w, h: hh };
+  }
+  function drawScope(data, id = 'scope', color = C.brass) {
+    const c = $(id); const { x, w, h } = fit(c);
+    x.clearRect(0, 0, w, h);
+    if (!data || !data.length) return;
+    let max = 1; for (const v of data) if (v > max) max = v; max *= 1.25;
+    const step = w / Math.max(1, data.length - 1);
+    x.beginPath();
+    data.forEach((v, i) => { const px = i * step, py = h - (v / max) * (h - 3) - 2; i ? x.lineTo(px, py) : x.moveTo(px, py); });
+    x.strokeStyle = color; x.lineWidth = 1.5; x.lineJoin = 'round'; x.stroke();
+    x.lineTo((data.length - 1) * step, h); x.lineTo(0, h); x.closePath();
+    x.fillStyle = 'rgba(201,162,75,.10)'; x.fill();
+  }
+
+  // ---------- routing schematic (matte, no glow) ----------
+  const pulses = []; let spawnAcc = 0, lastT = 0;
+  function bez(t, p0, p1, p2, p3) {
+    const u = 1 - t;
+    return { x: u*u*u*p0.x + 3*u*u*t*p1.x + 3*u*t*t*p2.x + t*t*t*p3.x,
+             y: u*u*u*p0.y + 3*u*u*t*p1.y + 3*u*t*t*p2.y + t*t*t*p3.y };
+  }
+  function pickPort(backs) {
+    const elig = backs.filter((b) => !b.dead && b.alive && b.share > 0);
+    if (!elig.length) return null;
+    const total = elig.reduce((a, b) => a + b.share, 0);
+    let r = Math.random() * total;
+    for (const b of elig) { r -= b.share; if (r <= 0) return b; }
+    return elig[elig.length - 1];
+  }
+  function rr(x, X, Y, w, h, r) {
+    x.beginPath(); x.moveTo(X+r, Y); x.arcTo(X+w, Y, X+w, Y+h, r); x.arcTo(X+w, Y+h, X, Y+h, r);
+    x.arcTo(X, Y+h, X, Y, r); x.arcTo(X, Y, X+w, Y, r); x.closePath();
+  }
+  function node(x, X, Y, w, h, r, border) {
+    x.save();
+    x.shadowColor = 'rgba(0,0,0,.45)'; x.shadowBlur = 20; x.shadowOffsetY = 9;
+    x.fillStyle = document.body.classList.contains('light') ? '#e7eae1' : '#193035'; rr(x, X, Y, w, h, r); x.fill();
+    x.restore();
+    x.strokeStyle = border; x.lineWidth = 1; rr(x, X, Y, w, h, r); x.stroke();
+  }
+
+  function frame(ts) {
+    const c = $('graph'); const { x, w, h } = fit(c);
+    const dt = lastT ? Math.min(0.05, (ts - lastT) / 1000) : 0; lastT = ts;
+    x.clearRect(0, 0, w, h);
+
+    const s = latest, backs = s ? s.backends : [];
+    const n = Math.max(1, backs.length);
+    const ingress = { x: 56, y: h / 2 };
+    const lb = { x: w * 0.40, y: h / 2, w: 156, h: 88 };
+    const lbRight = lb.x + lb.w / 2;
+    const portX = Math.max(170, w - 138), slot = h / (n + 1);
+    portRects = [];
+    const pts = backs.map((b, i) => ({ b, x: portX, y: slot * (i + 1) }));
+    const live = s && s.rps > 0;
+
+    // ingress -> LB
+    x.lineCap = 'round';
+    x.strokeStyle = live ? 'rgba(201,162,75,.6)' : 'rgba(236,230,216,.12)';
+    x.lineWidth = live ? 2 : 1.25;
+    x.beginPath(); x.moveTo(ingress.x + 10, ingress.y); x.lineTo(lb.x - lb.w/2, lb.y); x.stroke();
+
+    // LB -> ports
+    for (const p of pts) {
+      const c1 = { x: lbRight + 80, y: lb.y }, c2 = { x: p.x - 80, y: p.y };
+      const dead = p.b.dead || !p.b.alive || p.b.breaker === 'open';
+      const share = p.b.share || 0;
+      x.setLineDash([]);
+      x.strokeStyle = 'rgba(236,230,216,.07)'; x.lineWidth = 1;
+      x.beginPath(); x.moveTo(lbRight, lb.y); x.bezierCurveTo(c1.x,c1.y,c2.x,c2.y,p.x,p.y); x.stroke();
+      if (dead) {
+        x.strokeStyle = 'rgba(200,112,94,.55)'; x.lineWidth = 1.25; x.setLineDash([2,7]);
+        x.beginPath(); x.moveTo(lbRight, lb.y); x.bezierCurveTo(c1.x,c1.y,c2.x,c2.y,p.x,p.y); x.stroke();
+        x.setLineDash([]);
+      } else if (share > 0) {
+        x.strokeStyle = 'rgba(201,162,75,' + (0.3 + (share/100)*0.55) + ')';
+        x.lineWidth = 1 + (share/100)*4;
+        x.beginPath(); x.moveTo(lbRight, lb.y); x.bezierCurveTo(c1.x,c1.y,c2.x,c2.y,p.x,p.y); x.stroke();
+      }
+      p._c1 = c1; p._c2 = c2;
+    }
+
+    // matte pulses (small brass dots, no glow)
+    if (s && s.rps > 0 && !reduce) {
+      spawnAcc = Math.min(220, spawnAcc + s.rps * dt * 0.055);
+      while (spawnAcc >= 1 && pulses.length < 220) { spawnAcc -= 1; pulses.push({ leg: 'in', t: 0, port: null }); }
+    }
+    for (let i = pulses.length - 1; i >= 0; i--) {
+      const p = pulses[i]; p.t += dt / 0.66;
+      let pos;
+      if (p.leg === 'in') {
+        pos = { x: ingress.x + 10 + (lb.x - lb.w/2 - ingress.x - 10) * p.t, y: lb.y };
+        if (p.t >= 1) { const tg = pickPort(backs); if (!tg) { pulses.splice(i,1); continue; } p.leg = 'out'; p.t = 0; p.port = pts.find((q) => q.b.id === tg.id); continue; }
+      } else {
+        const pp = p.port; if (!pp || pp.b.dead) { pulses.splice(i,1); continue; }
+        pos = bez(p.t, { x: lbRight, y: lb.y }, pp._c1, pp._c2, { x: pp.x, y: pp.y });
+        if (p.t >= 1) pulses.splice(i,1);
+      }
+      x.fillStyle = C.brass; x.beginPath(); x.arc(pos.x, pos.y, 2.6, 0, 7); x.fill();
+      x.fillStyle = '#f4ead0'; x.beginPath(); x.arc(pos.x, pos.y, 1, 0, 7); x.fill();
+    }
+
+    // ingress node
+    node(x, ingress.x - 9, ingress.y - 30, 18, 60, 3, 'rgba(236,230,216,.18)');
+    x.fillStyle = C.mut2; x.font = '500 8.5px "IBM Plex Mono", monospace'; x.textAlign = 'center';
+    x.save(); x.translate(ingress.x - 18, ingress.y); x.rotate(-Math.PI/2); x.fillText('INGRESS', 0, 0); x.restore();
+
+    // LB node (flat, matte)
+    const lbx = lb.x - lb.w/2, lby = lb.y - lb.h/2;
+    node(x, lbx, lby, lb.w, lb.h, 6, live ? 'rgba(201,162,75,.5)' : 'rgba(236,230,216,.16)');
+    x.textAlign = 'center';
+    x.fillStyle = C.mut2; x.font = '500 8.5px "IBM Plex Mono", monospace';
+    x.fillText('LOAD BALANCER', lb.x, lb.y - 28);
+    x.fillStyle = C.cream; x.font = '500 30px "Fraunces", serif';
+    x.fillText(s ? s.rps : 0, lb.x, lb.y + 3);
+    x.fillStyle = C.mut2; x.font = '500 8px "IBM Plex Mono", monospace';
+    x.fillText('req / s', lb.x, lb.y + 16);
+    x.strokeStyle = 'rgba(236,230,216,.1)'; x.lineWidth = 1;
+    x.beginPath(); x.moveTo(lbx + 18, lb.y + 24); x.lineTo(lbx + lb.w - 18, lb.y + 24); x.stroke();
+    x.fillStyle = C.brass; x.font = '500 10px "IBM Plex Mono", monospace';
+    x.fillText((STRAT_LABEL[s && s.strategy] || (s && s.strategy) || '').toUpperCase(), lb.x, lb.y + 37);
+
+    // port nodes
+    for (const p of pts) {
+      const b = p.b, dead = b.dead || !b.alive || b.breaker === 'open';
+      const col = dead ? C.down : b.breaker === 'half_open' ? C.brass : C.ok;
+      const bw = 126, bh = 46, bx = p.x, by = p.y - bh/2;
+      portRects.push({ id: b.id, x: bx, y: by, w: bw, h: bh });
+      x.globalAlpha = dead ? 0.5 : 1;
+      node(x, bx, by, bw, bh, 5, 'rgba(236,230,216,.14)');
+      x.fillStyle = col; x.beginPath(); x.arc(bx + 17, p.y, 4, 0, 7); x.fill();
+      x.textAlign = 'left'; x.fillStyle = C.cream; x.font = '500 13px "Fraunces", serif';
+      x.fillText(b.id, bx + 30, p.y - 2);
+      x.fillStyle = C.mut2; x.font = '500 9px "IBM Plex Mono", monospace';
+      x.fillText(b.latency + 'ms · ' + b.share + '%', bx + 30, p.y + 12);
+      x.globalAlpha = 1;
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  $('graph').addEventListener('click', (e) => {
+    const r = e.target.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top;
+    for (const p of portRects) if (cx >= p.x && cx <= p.x + p.w && cy >= p.y && cy <= p.y + p.h) { toggle(p.id); break; }
+  });
+  $('graph').addEventListener('mousemove', (e) => {
+    const r = e.target.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top;
+    e.target.style.cursor = portRects.some((p) => cx >= p.x && cx <= p.x + p.w && cy >= p.y && cy <= p.y + p.h) ? 'pointer' : 'default';
+  });
+
+
+  async function post(url, data = {}) {
+    try {
+      const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json','X-Pulse-Local':'1'},body:JSON.stringify(data)});
+      if (!r.ok) throw new Error('Action rejected ('+r.status+')');
+    } catch(e) { $('statusText').textContent = e.message; }
+  }
+  $('run').onclick = () => post('/api/test/' + (running ? 'stop' : 'start'), {workers:Number($('workers').value)});
+  $('strategy').onchange = e => post('/api/strategy', {strategy:e.target.value});
+  window.toggle = id => post('/api/backend/' + encodeURIComponent(id) + '/toggle');
+  $('add').onclick = () => post('/api/backend/add');
+  $('arena').onclick = () => post('/api/arena', {workers:Number($('workers').value)});
+  function applyTheme(light) {
+    document.body.classList.toggle('light',light);
+    const s = getComputedStyle(document.body);
+    for(const [k,v] of Object.entries({brass:'--brass',cream:'--cream',mut:'--muted',mut2:'--muted2',ok:'--ok',down:'--down',line:'--line'})) C[k]=s.getPropertyValue(v).trim();
+    $('theme').textContent=light?'Dark mode':'Light mode';
+  }
+  $('theme').onclick=()=>{const light=!document.body.classList.contains('light');applyTheme(light);try{localStorage.setItem('pulse-theme',light?'light':'dark')}catch{}};
+  try{applyTheme(localStorage.getItem('pulse-theme')==='light')}catch{applyTheme(false)}
+
+
+  const es = new EventSource('/api/stream');
+  es.onmessage = (e) => { try { latest = JSON.parse(e.data); renderDOM(latest); } catch {} };
+  es.onerror = () => { $('statusText').textContent = 'reconnecting…'; };
+  requestAnimationFrame(frame);
+  window.addEventListener('resize', () => latest && drawScope(latest.series.rps));
+</script>
+</body>
+</html>
