@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import secrets
 import time
 from contextlib import AsyncExitStack
 
@@ -75,7 +74,7 @@ async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
             configs.append(BackendConfig(id=n.id, host="127.0.0.1", port=port,
                                          capacity=n.capacity, weight=n.weight))
         config = AppConfig(
-            server=ServerConfig(host="127.0.0.1", port=0, admin_token=secrets.token_hex(24)),
+            server=ServerConfig(host="127.0.0.1", port=0),
             backends=configs, persistence=PersistenceConfig(enabled=False),
             load_balancing=LoadBalancingConfig.model_validate({"strategy":algorithm}),
             health_check=HealthCheckConfig(interval=.2, timeout=.5, failure_threshold=1),

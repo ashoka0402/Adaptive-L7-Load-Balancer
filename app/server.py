@@ -8,6 +8,7 @@ import sqlite3
 
 from aiohttp import web
 
+from app.admin.local_access import local_management
 from app.admin.routes import setup_admin_routes
 from app.app_keys import CONFIG_KEY, REGISTRY_KEY
 from app.config import AppConfig
@@ -114,7 +115,9 @@ class LoadBalancerApp:
             self.console,
         )
 
-        self.app = web.Application(client_max_size=self.config.request.max_body_size)
+        self.app = web.Application(
+            client_max_size=self.config.request.max_body_size, middlewares=[local_management]
+        )
         self.app[CONFIG_KEY] = self.config
         self.app[REGISTRY_KEY] = self.registry
         setup_admin_routes(self.app, self.switch_strategy)

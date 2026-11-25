@@ -1,4 +1,4 @@
-"""Same-origin console assets and authenticated instance telemetry."""
+"""Same-origin console assets and local instance telemetry."""
 from __future__ import annotations
 
 import time
@@ -7,7 +7,6 @@ from pathlib import Path
 from aiohttp import web
 
 from app.app_keys import CONFIG_KEY, REGISTRY_KEY
-from app.experiments.routes import authorize
 from app.resilience.backpressure import BackpressureController
 from app.ui.telemetry import ConsoleTelemetry
 
@@ -36,7 +35,6 @@ async def asset(request: web.Request) -> web.FileResponse:
 
 
 async def overview(request: web.Request) -> web.Response:
-    authorize(request)
     config = request.app[CONFIG_KEY]
     registry = request.app[REGISTRY_KEY]
     pressure = request.app[PRESSURE]

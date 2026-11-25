@@ -3,24 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import csv
-import hmac
 import io
 import json
 
 from aiohttp import web
 from pydantic import ValidationError
 
-from app.app_keys import CONFIG_KEY
 from app.experiments.manager import TERMINAL, ExperimentManager
 from app.experiments.spec import ExperimentSpec
 
 EXPERIMENTS_KEY = web.AppKey("experiments",ExperimentManager)
-
-
-def authorize(request: web.Request) -> None:
-    token = request.app[CONFIG_KEY].server.admin_token
-    if not hmac.compare_digest(request.headers.get("Authorization","").encode(),f"Bearer {token}".encode()):
-        raise web.HTTPUnauthorized()
 
 
 def get_job(request: web.Request):
@@ -31,7 +23,6 @@ def get_job(request: web.Request):
 
 
 async def create(request: web.Request) -> web.Response:
-    authorize(request)
     try:
         spec=ExperimentSpec.model_validate(await request.json())
         job=request.app[EXPERIMENTS_KEY].start(spec)
@@ -43,14 +34,12 @@ async def create(request: web.Request) -> web.Response:
 
 
 async def history(request: web.Request) -> web.Response:
-    authorize(request)
     manager=request.app[EXPERIMENTS_KEY]
     saved=await asyncio.to_thread(manager.store.recent_experiments) if manager.store else []
     return web.json_response({"active":[j.info() for j in manager.jobs.values()],"saved":saved})
 
 
 async def result(request: web.Request) -> web.Response:
-    authorize(request)
     manager=request.app[EXPERIMENTS_KEY]
     job=manager.jobs.get(request.match_info["id"])
     if job:
@@ -63,7 +52,6 @@ async def result(request: web.Request) -> web.Response:
 
 
 async def control(request: web.Request) -> web.Response:
-    authorize(request)
     manager=request.app[EXPERIMENTS_KEY]
     action=request.match_info["action"]
     job=manager.jobs.get(request.match_info["id"])
@@ -99,7 +87,6 @@ async def control(request: web.Request) -> web.Response:
 
 
 async def export(request: web.Request) -> web.Response:
-    authorize(request)
     manager=request.app[EXPERIMENTS_KEY]
     job=manager.jobs.get(request.match_info["id"])
     payload=job.info(full=True) if job else None
@@ -119,7 +106,6 @@ async def export(request: web.Request) -> web.Response:
 
 
 async def stream(request: web.Request) -> web.StreamResponse:
-    authorize(request)
     job=get_job(request)
     response=web.StreamResponse(headers={"Content-Type":"text/event-stream","Cache-Control":"no-cache"})
     await response.prepare(request)

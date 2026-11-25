@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hmac
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -20,25 +19,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _auth(request: web.Request, token: str) -> web.Response | None:
-    auth = request.headers.get("Authorization", "")
-    if not hmac.compare_digest(auth.encode(), f"Bearer {token}".encode()):
-        return web.json_response({"error": "unauthorized"}, status=401)
-    return None
-
-
 async def list_backends(request: web.Request) -> web.Response:
-    cfg: AppConfig = request.app[CONFIG_KEY]
-    if err := _auth(request, cfg.server.admin_token):
-        return err
     registry: BackendRegistry = request.app[REGISTRY_KEY]
     return web.json_response([b.to_dict() for b in registry.list_all()])
 
 
 async def add_backend(request: web.Request) -> web.Response:
     cfg: AppConfig = request.app[CONFIG_KEY]
-    if err := _auth(request, cfg.server.admin_token):
-        return err
     registry: BackendRegistry = request.app[REGISTRY_KEY]
     try:
         body = await request.json()
@@ -80,9 +67,6 @@ async def add_backend(request: web.Request) -> web.Response:
 
 
 async def update_backend(request: web.Request) -> web.Response:
-    cfg: AppConfig = request.app[CONFIG_KEY]
-    if err := _auth(request, cfg.server.admin_token):
-        return err
     registry: BackendRegistry = request.app[REGISTRY_KEY]
     bid = request.match_info["id"]
     backend = registry.get(bid)
@@ -122,9 +106,6 @@ async def update_backend(request: web.Request) -> web.Response:
 
 
 async def delete_backend(request: web.Request) -> web.Response:
-    cfg: AppConfig = request.app[CONFIG_KEY]
-    if err := _auth(request, cfg.server.admin_token):
-        return err
     registry: BackendRegistry = request.app[REGISTRY_KEY]
     bid = request.match_info["id"]
     removed = registry.remove(bid)
@@ -137,8 +118,6 @@ async def delete_backend(request: web.Request) -> web.Response:
 def setup_admin_routes(app: web.Application, switch_strategy: Callable[[str], None]) -> None:
     async def update_strategy(request: web.Request) -> web.Response:
         cfg = request.app[CONFIG_KEY]
-        if err := _auth(request, cfg.server.admin_token):
-            return err
         try:
             body = await request.json()
             if not isinstance(body, dict) or not isinstance(body.get("strategy"), str):

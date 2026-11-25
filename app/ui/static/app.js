@@ -1,19 +1,18 @@
 import {ALGORITHMS,esc,number,share,arenaSpec,SCENARIOS} from "./model.js";
 const $=id=>document.getElementById(id);
-let token="",online=false,loading=false,history=[],jobId=null,jobBusy=false,generating=false,trafficStop=false;
+let online=false,loading=false,history=[],jobId=null,jobBusy=false,generating=false,trafficStop=false;
 const terminal=new Set(["completed","cancelled","failed"]);
 const options=Object.entries(ALGORITHMS).map(([key,label])=>'<option value="'+key+'">'+label+'</option>').join("");
 $("strategy").innerHTML=options;
 function notice(s){$("notice").textContent=s}
 function setConnected(value){
  online=value; $("connection").textContent=value?"Connected":"Not connected";
- $("auth-button").textContent=value?"Disconnect":"Connect";
  $("strategy").disabled=!value; $("generate").disabled=!value||generating; $("run-arena").disabled=!value||jobBusy;
  $("cancel-arena").disabled=!value||!jobBusy;
 }
 async function api(path,method="GET",body){
- const res=await fetch("/admin/"+path,{method,headers:{Authorization:"Bearer "+token,...(body===undefined?{}:{"Content-Type":"application/json"})},...(body===undefined?{}:{body:JSON.stringify(body)}),cache:"no-store"});
- if(!res.ok){if(res.status===401)setConnected(false);let msg="Request failed ("+res.status+")";try{msg=(await res.json()).error||msg}catch{}throw Error(msg)}
+ const res=await fetch("/admin/"+path,{method,headers:{"X-Pulse-Local":"1",...(body===undefined?{}:{"Content-Type":"application/json"})},...(body===undefined?{}:{body:JSON.stringify(body)}),cache:"no-store"});
+ if(!res.ok){let msg="Request failed ("+res.status+")";try{msg=(await res.json()).error||msg}catch{}throw Error(msg)}
  return res.json();
 }
 const themeColor=name=>getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -68,21 +67,14 @@ function renderLive(data,append=true){
  redraw();
 }
 async function refresh(){
- if(!online||loading)return;loading=true;
- try{const data=await api("console");if(online)renderLive(data)}catch(e){notice(e.message)}finally{loading=false}
+ if(loading)return;loading=true;
+ try{const data=await api("console");if(!online){history=[];setConnected(true);notice("")}renderLive(data)}catch(e){setConnected(false);trafficStop=true;notice("Engine unavailable · "+e.message)}finally{loading=false}
 }
 document.querySelectorAll("[data-page]").forEach(btn=>btn.addEventListener("click",()=>{
  const id=btn.dataset.page;for(const page of ["dashboard","arena"])$(page).hidden=id!==page;
  document.querySelectorAll("[data-page]").forEach(b=>{b.classList.toggle("active",b===btn);if(b===btn)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")});
  if(id==="dashboard")redraw()
 }));
-$("auth-button").addEventListener("click",()=>{if(online){token="";trafficStop=true;setConnected(false);notice("Disconnected · showing last observed metrics.");return}$("auth-error").textContent="";$("auth-dialog").showModal()});
-$("close-auth").addEventListener("click",()=>$("auth-dialog").close());
-$("auth-form").addEventListener("submit",async e=>{
- e.preventDefault();token=$("token").value;
- try{const data=await api("console");history=[];setConnected(true);renderLive(data);$("token").value="";$("auth-dialog").close();notice("")}
- catch(err){token="";$("auth-error").textContent=err.message}
-});
 $("strategy").addEventListener("change",async()=>{const selected=$("strategy").value;try{await api("strategy","PATCH",{strategy:selected});notice("Routing algorithm changed to "+ALGORITHMS[selected]);await refresh()}catch(e){notice(e.message);await refresh()}});
 $("backends").addEventListener("click",async e=>{
  const b=e.target.closest("[data-backend]");if(!b||!online)return;b.disabled=true;
@@ -124,5 +116,6 @@ $("arena-form").addEventListener("submit",async e=>{
 $("cancel-arena").addEventListener("click",async()=>{if(!jobId)return;try{renderJob(await api("experiments/"+jobId+"/cancel","POST"))}catch(e){notice(e.message)}});
 let pollingJob=false;
 async function pollJob(){if(!online||!jobBusy||!jobId||pollingJob)return;pollingJob=true;try{const job=await api("experiments/"+jobId);renderJob(job);if(terminal.has(job.state)){jobBusy=false;setConnected(online)}}catch(e){notice(e.message)}finally{pollingJob=false}}
+refresh();
 setInterval(()=>{refresh();pollJob()},1000);
 window.addEventListener("resize",redraw);

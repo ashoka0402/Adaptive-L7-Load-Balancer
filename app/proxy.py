@@ -224,9 +224,6 @@ class ReverseProxy:
         url = URL(f"http://{backend.host}:{backend.port}{request.rel_url.raw_path_qs}", encoded=True)
 
         headers = self._filter_headers(ctx.headers, ctx.hop_headers)
-        # Never forward the control-plane credential, even on an ordinary proxy path.
-        if headers.get("authorization") == f"Bearer {self.config.server.admin_token}":
-            headers.pop("authorization", None)
         headers["x-request-id"] = ctx.request_id
         headers["x-forwarded-for"] = request.remote or "unknown"
         headers["x-forwarded-proto"] = request.scheme
@@ -277,7 +274,7 @@ class ReverseProxy:
             kl = k.lower()
             if kl in HOP_BY_HOP or kl in connection_tokens:
                 continue
-            if kl in {"host", "forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto"}:
+            if kl in {"host", "forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-pulse-local"}:
                 continue
             out[k] = v
         return out

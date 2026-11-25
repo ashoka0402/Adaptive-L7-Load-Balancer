@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import Any, Literal
@@ -17,9 +16,8 @@ class ConfigModel(BaseModel):
 
 
 class ServerConfig(ConfigModel):
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=0, le=65535)
-    admin_token: str = ""
 
 
 class LoadBalancingConfig(ConfigModel):
@@ -154,10 +152,6 @@ class AppConfig(ConfigModel):
 
     @model_validator(mode="after")
     def ensure_backends(self) -> AppConfig:
-        if self.server.admin_token in {"", "admin-secret-token-change-me"} or len(
-            self.server.admin_token
-        ) < 16:
-            raise ValueError("admin token must be an external secret of at least 16 characters")
         if not self.backends:
             raise ValueError("at least one backend must be configured")
         ids = [b.id for b in self.backends]
@@ -173,10 +167,4 @@ def load_config(path: str | Path) -> AppConfig:
         raise FileNotFoundError(f"config file not found: {path}")
     with path.open() as f:
         raw: dict[str, Any] = yaml.safe_load(f) or {}
-    token = os.environ.get("PULSE_ADMIN_TOKEN")
-    if token:
-        raw.setdefault("server", {})["admin_token"] = token
-    configured_token = raw.get("server", {}).get("admin_token", "")
-    if configured_token in {"", "admin-secret-token-change-me"} or len(configured_token) < 16:
-        raise ValueError("set PULSE_ADMIN_TOKEN to a secret of at least 16 characters")
     return AppConfig.model_validate(raw)
