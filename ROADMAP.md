@@ -47,3 +47,7 @@ Roadmap order follows risk and evidence, not feature count.
 
 - Review real CI browser screenshots and verify UI accessibility, controls, rendering and deployment under realistic load. Keep all frontend metrics linked to observations.
 - Phase 5: hardening, security, reproducible comparisons and release documentation.
+
+## Release candidate
+
+Phase 5 hardening and verification workflows are implemented. Remaining production work is tracked in [release boundaries](docs/release.md), including sustained load, HA, externally audited deployment and isolation. Release claims must follow exact-commit CI evidence.

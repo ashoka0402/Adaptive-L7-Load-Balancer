@@ -71,3 +71,10 @@ Phase 3 follow-up: added opt-in sampled live baseline shadow decisions and a ded
 - Remaining: full browser/visual validation, production deployment hardening and the Phase 3 limitations documented above.
 
 Phase 4 follow-up: authenticated runtime SLO/safety target editing with atomic validation; corrected decision sampling to count selections rather than completed requests. CI lint finding in browser test fixed without changing test expectations.
+
+## Phase 5 — release candidate implementation
+
+- Added cancellation-safe admission, exact operator-configured dynamic destinations, reserved-path protection, disabled health redirects, cookie isolation, raw compressed forwarding, finite connection limits and explicit SQLite connection cleanup. Added regression coverage for configuration, queue cancellation, credential isolation and real forwarding.
+- Added same-runner historical/current HTTP comparison, Docker smoke/isolated Arena checks, release documentation, security policy, contributor guide, demo and interview material.
+- Phase 4 final workflow completed successfully (run 45621598569). Phase 5 CI must be read for the exact updated commit; no new benchmark numbers or passing tests are claimed in advance.
+- Remaining production-readiness gaps are documented in docs/release.md. No public tag/release or external deployment has been made.

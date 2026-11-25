@@ -70,3 +70,57 @@ jobs:
         with:
           name: pulse-console-browser-evidence
           path: reports/
+
+  release-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Check out the original audited implementation
+        run: git worktree add --detach "$RUNNER_TEMP/pulse-original" 027d578d790fa6b1784e7fee3969f7003ac8272d
+      - name: Execute real original/current HTTP measurements
+        run: python -m benchmarks.release_compare --baseline "$RUNNER_TEMP/pulse-original" --output reports/release-comparison.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pulse-release-http-comparison
+          path: reports/release-comparison.json
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PULSE_ADMIN_TOKEN: ci-local-only-smoke-token
+      GRAFANA_ADMIN_PASSWORD: ci-local-only-grafana-password
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configurations
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.lab.yml config --quiet
+      - name: Build and launch Pulse with its three demo backends
+        run: docker compose up -d --build load-balancer
+      - name: Check real proxy, console, and authenticated control plane
+        run: |
+          curl --fail --retry 20 --retry-delay 2 --retry-all-errors http://127.0.0.1:8080/pulse/
+          curl --fail --retry 20 --retry-delay 2 --retry-all-errors http://127.0.0.1:8080/api/test
+          curl --fail -H "Authorization: Bearer $PULSE_ADMIN_TOKEN" http://127.0.0.1:8080/admin/console
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/admin/console)" = 401
+      - name: Run network-isolated Docker Arena
+        run: |
+          mkdir -p reports
+          docker compose -f docker-compose.lab.yml run --rm arena
+          python -c 'import json; d=json.load(open("reports/http-arena.json")); assert d["state"]=="completed"; assert len(d["runs"])==6; assert all(r["mode"]=="http" and r["summary"]["successful"]>0 for r in d["runs"])'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pulse-docker-http-arena
+          path: reports/http-arena.json
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v

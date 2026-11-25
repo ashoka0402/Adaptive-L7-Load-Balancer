@@ -1,153 +1,90 @@
-# Pulse — Adaptive Traffic Intelligence Engine
+<div align="center">
 
-> Don't just distribute traffic. Understand it.
+# PULSE
+### Adaptive Traffic Intelligence Engine
 
-Pulse is an asynchronous Layer 7 HTTP load balancer with a feedback-controlled routing engine. It combines live latency, concurrency, queue, error, and optional resource signals into versioned routing policies, then distributes traffic probabilistically to avoid starvation, oscillation, and overload concentration.
+**Traffic is a signal. Read it.**
 
-Pulse remains a modular monolith: one `aiohttp` data plane, one adaptive controller task, bounded in-memory telemetry, and JSON/Prometheus integration points.
-
-## What it provides
-
-- Adaptive routing with normalized multidimensional pressure scores.
-- Weighted probabilistic distribution, bounded exploration, cold-start handling, and slow start.
-- Smoothed policy changes with per-interval probability limits.
-- Explainable policy snapshots and runtime-adjustable metric weights.
-- Baseline round-robin, weighted round-robin, least-connections, and EWMA latency-aware strategies.
-- Active/passive health, circuit breaking, bounded retries, backpressure, connection reuse, metrics, and structured logs.
-- Async traffic generation and SQLite persistence adapters for experiments and policy history.
-
-## Quick start
-
-Python 3.12 or newer is required.
-
-```powershell
-python -m venv .venv
-# Linux/macOS: source .venv/bin/activate
-# PowerShell: .venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-python -m pytest -q
-$env:PULSE_ADMIN_TOKEN = "replace-with-a-long-random-secret" # PowerShell
-python -m app.main -c config/config.yaml
-```
-
-The supplied configuration uses Docker service names. For a local non-Docker run, change backend hosts in `config/config.yaml` to `127.0.0.1` and start the demo backends separately.
-
-Run the complete development topology:
-
-```bash
-export PULSE_ADMIN_TOKEN='replace-with-a-long-random-secret'
-export GRAFANA_ADMIN_PASSWORD='replace-with-a-long-random-secret'
-docker compose up --build
-```
-
-| Service | Development URL |
-|---|---|
-| Pulse | `http://localhost:8080` |
-| Prometheus | `http://localhost:9090` |
-| Grafana | `http://localhost:3000` |
-
-Startup fails when `PULSE_ADMIN_TOKEN` is absent, short, or the former sample value. Docker Compose also requires an explicit Grafana password.
-
-## Adaptive configuration
-
-```yaml
-load_balancing:
-  strategy: adaptive
-
-adaptive:
-  interval: 1.0
-  window_size: 100
-  exploration: 0.03
-  min_probability: 0.005
-  slow_start_seconds: 30
-  smoothing: 0.30
-  max_probability_step: 0.15
-  weights:
-    latency: 0.35
-    connections: 0.25
-    queue: 0.15
-    errors: 0.20
-    resources: 0.05
-```
-
-Each backend also has a static `weight` and configured `capacity`. Queue, CPU, and memory signals are optional and supplied through the admin telemetry endpoint.
-
-## Operations API
-
-All admin endpoints require `Authorization: Bearer <PULSE_ADMIN_TOKEN>`.
-
-```text
-GET    /admin/backends
-POST   /admin/backends
-PATCH  /admin/backends/{id}
-DELETE /admin/backends/{id}
-PUT    /admin/backends/{id}/telemetry
-GET    /admin/routing/policy
-PATCH  /admin/routing/weights
-GET    /metrics
-```
-
-Example policy inspection:
-
-```bash
-curl -H "Authorization: Bearer $PULSE_ADMIN_TOKEN" \
-  http://localhost:8080/admin/routing/policy
-```
-
-Example external telemetry update:
-
-```bash
-curl -X PUT -H "Authorization: Bearer $PULSE_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"queue_depth":12,"cpu":0.72,"memory":0.61}' \
-  http://localhost:8080/admin/backends/backend-1/telemetry
-```
-
-## Validation
-
-```bash
-python -m pytest -q
-python -m ruff check .
-python -m mypy app
-```
-
-Run a measured workload against a live instance:
-
-```bash
-python benchmarks/run_benchmarks.py \
-  --url http://127.0.0.1:8080/api/test \
-  --concurrency 50 --warmup 2 --duration 10 \
-  --label adaptive --output docs/benchmarks/adaptive.json
-```
-
-Use identical topology, workload, warm-up, and environment for comparisons. The runner records actual elapsed time, status counts, latency percentiles, and environment metadata. Simulation results must be labeled separately from end-to-end HTTP measurements. No performance improvement is claimed without committed raw results.
-
-Run the deterministic identical-workload routing comparison:
-
-```bash
-python benchmarks/compare_routing.py --seed 7 \
-  --output docs/benchmarks/routing-simulation-seed-7.json
-```
-
-## Design and status
-
-- `ARCHITECTURE.md` describes the request path, adaptive policy, concurrency model, and trust boundaries.
-- `IMPLEMENTATION_STATUS.md` distinguishes implemented, partial, and planned capabilities.
-- `ROADMAP.md` orders the remaining work.
-- `docs/adr/` records durable architectural decisions.
-
-## Current limits
-
-Pulse is an engineering platform, not a replacement for a mature edge proxy. It currently has single-process state, buffered request bodies, no TLS termination or service discovery, shared-token operations authentication, and no backend destination allowlist. SQLite policy history is local to one instance.
-
-Licensed under MIT.
-
-## Verification and experiment lab
+Don't just distribute traffic. Understand it.
 
 [![Pulse verification](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions/workflows/verify.yml/badge.svg)](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions/workflows/verify.yml)
 
-GitHub Actions executes the full test suite on Python 3.12/3.13, Ruff, mypy, and an actual seeded Arena simulation; reports are downloadable as workflow artifacts. See [Lab, Chaos, Arena and Replay](docs/experiments.md) for API and isolated benchmark instructions.
+[Quick start](#quick-start) · [Console](docs/console.md) · [Benchmarks](docs/benchmarks/README.md) · [Demo](docs/demo.md) · [Architecture](ARCHITECTURE.md)
 
-## Pulse visual console
+</div>
 
-Open **[http://localhost:8080/pulse/](http://localhost:8080/pulse/)** after starting the engine. Enter your configured admin token to connect. The console includes a live traffic fabric, experiment cockpit, synchronized algorithm battles, fault scheduling, recorded replay, Autopilot, backend intelligence and a responsive dark/light interface. See [console documentation](docs/console.md) and the real browser evidence in [GitHub Actions](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions).
+Pulse is a production-inspired asynchronous Layer 7 HTTP reverse proxy and traffic experimentation engine. Rather than always selecting the lowest-latency server, it uses multidimensional feedback and immutable policy snapshots to distribute requests among eligible backends. Prediction, SLO-aware weight blending and optional bounded learning build on that controller.
+
+## The system
+
+```mermaid
+flowchart LR
+  Clients --> Admission --> Router
+  Router --> B1[Backend 1]
+  Router --> B2[Backend 2]
+  Router --> B3[Backend 3]
+  B1 --> Telemetry
+  B2 --> Telemetry
+  B3 --> Telemetry
+  Telemetry --> Controller
+  Controller --> Snapshot[Immutable policy]
+  Snapshot --> Router
+  Console --> API[Authenticated control plane]
+  API --> Controller
+  API --> Lab[Isolated Lab / Arena]
+  Lab --> Replay[Recorded outcomes]
+```
+
+| Capability | Behavior |
+| --- | --- |
+| Pulse Core | Baseline algorithms and multidimensional probabilistic routing |
+| Pulse Predict | Bounded regression forecasts and class-aware fingerprints |
+| Autopilot | SLO feedback, bounded objective blending, cooldown and rollback |
+| Resilience | Health checks, circuit breakers, cancellation-safe backpressure and retries |
+| Lab / Chaos | Seeded queues and isolated local HTTP workloads with scheduled faults |
+| Arena / Replay | Eight experiment strategies, identical seeded traces, raw results and synchronized playback |
+| Shadow | Sampled decision estimates without duplicate upstream traffic |
+| Console | Live sampled topology, charts, experiment controls, SLO settings and backend inspector |
+
+## Quick start
+
+Python 3.12+ or Docker. Set unique local secrets; never use production credentials for a demo.
+
+```powershell
+$env:PULSE_ADMIN_TOKEN = "replace-with-a-long-random-secret"
+$env:GRAFANA_ADMIN_PASSWORD = "replace-with-a-different-random-secret"
+docker compose up --build
+```
+
+Open **http://localhost:8080/pulse/** and enter the configured admin token. Prometheus is at port 9090 and Grafana at 3000. Services bind to loopback by default.
+
+For development without Docker use `python -m pip install -e '.[dev]'`, start local demo backends, configure their loopback addresses and run `python -m app.main -c config/config.yaml`. See the [guided demo](docs/demo.md).
+
+## Screenshots and verification
+
+Actual landing, overview, Arena and mobile screenshots are generated by the Chromium test and uploaded in the `pulse-console-browser-evidence` artifact. [Open Actions and choose a successful run](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions). These are real application screenshots, not mockups. No UI metric is hardcoded as measured data.
+
+```bash
+python -m pytest -ra
+ruff check .
+mypy app
+node --test frontend_tests/model.test.mjs
+```
+
+## Routing and performance
+
+The adaptive score combines weighted normalized latency, concurrency, queue pressure, error rate and resource signals. The controller adds a bounded prediction penalty and maps scores to probabilities, accounting for weight, slow start, exploration and movement limits. Eligibility and circuit checks remain mandatory.
+
+One previously recorded deterministic simulation reported 66 errors for Pulse adaptive versus 118 for EWMA, with higher p95 latency (19.38 ms versus 15.22 ms). That is a scenario-specific trade-off, **not an HTTP throughput improvement**. See the committed [raw benchmark evidence](docs/benchmarks/README.md).
+
+The release workflow generates a same-runner historical/current HTTP comparison and Docker Arena reports. Download raw JSON from CI, including any unfavorable outcomes.
+
+## API and deployment
+
+All `/admin/*` endpoints require bearer authentication. The API covers backends, external telemetry, routing policy and weights, intelligence, Autopilot and runtime SLOs, experiments, SSE progress, replay/export, and shadow results. [Console](docs/console.md) and [experiment API](docs/experiments.md) document the operations. New backend destinations must be explicitly configured in the startup allowlist.
+
+## Engineering notes
+
+[Architecture](ARCHITECTURE.md) · [Implementation status](IMPLEMENTATION_STATUS.md) · [Release boundaries](docs/release.md) · [Interview guide](docs/interview.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+
+Pulse is single-process and intended for trusted local experimentation. It is not a production-readiness certification. See the release notes for known limits before deployment.

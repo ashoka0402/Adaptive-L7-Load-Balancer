@@ -27,3 +27,7 @@ python benchmarks/compare_routing.py --seed 7 \
 The original service was an existing Docker container; Pulse was run as host processes because Docker became unresponsive after isolated baseline validation. Host/container networking and process placement differ, so these files are retained as smoke/performance samples and are **not** an original-versus-Pulse throughput comparison.
 
 The separately audited original commit `027d578` passed 14 tests. Its old benchmark runner produced 203.2, 239.2, and 80.9 reported RPS over three 10-second runs, but that runner divided by requested rather than actual elapsed time and excluded exception latency. Those figures must not be compared to the corrected JSON artifacts.
+
+## Release comparison (same-runner HTTP)
+
+The release CI job runs `python -m benchmarks.release_compare --baseline /path/to/original --output reports/release-comparison.json` against commit `027d578d790fa6b1784e7fee3969f7003ac8272d`, current EWMA, and current adaptive. Identical local backend delays, client generator, concurrency, warmup and durations are used; variant order rotates across repetitions. The raw artifact and median values are the evidence. It is a closed-loop synthetic workload, not an open-loop sustainable capacity measurement. CI results are not claimed until the job completes. The Docker Arena artifact separately contains real isolated HTTP runs.

@@ -14,6 +14,7 @@ import secrets
 import socket
 import statistics
 import sys
+import tempfile
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from pathlib import Path
@@ -72,7 +73,7 @@ async def measure(root: Path, strategy: str, configs: list[dict], duration: floa
             data = result.to_dict()
             data["successful_rps"] = result.successful / result.elapsed_seconds
             if not result.successful:
-                raise RuntimeError("no successful HTTP responses; inspect " + str(log))
+                raise RuntimeError("no successful HTTP responses")
             return data
         finally:
             if process.returncode is None:
@@ -86,6 +87,7 @@ async def measure(root: Path, strategy: str, configs: list[dict], duration: floa
 
 async def compare(args: argparse.Namespace) -> dict:
     async with AsyncExitStack() as stack:
+        work = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="pulse-release-")))
         configs = []
         for i, delay in enumerate((.005, .015, .03)):
             async def serve(request: web.Request, delay: float = delay) -> web.Response:
@@ -106,7 +108,7 @@ async def compare(args: argparse.Namespace) -> dict:
             # Rotate order to reduce systematic warm-machine bias.
             for label, root, strategy in variants[repetition % 3:] + variants[:repetition % 3]:
                 result = await measure(root, strategy, configs, args.duration, args.warmup,
-                                       args.concurrency, args.output.parent.resolve())
+                                       args.concurrency, work)
                 rows.append({"variant": label, "repetition": repetition+1, **result})
         metrics = ("successful_rps", "p99_ms", "errors")
         summaries = {label: {metric: statistics.median(float(r[metric]) for r in rows

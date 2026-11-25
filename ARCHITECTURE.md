@@ -90,3 +90,7 @@ See [Lab and Arena API](docs/experiments.md). The experiment manager owns bounde
 ## Phase 4 console
 
 A same-origin static console at `/pulse/` consumes existing authenticated APIs and a new instance-local `/admin/console` endpoint. A bounded outcome window provides actual client latency/error observations for all routing strategies, independently of global Prometheus metrics. Canvas topology animation uses backend counter deltas and recorded experiment frames; SVG time series are derived from observations. No frontend build or additional network service is required. See [console documentation](docs/console.md).
+
+## Phase 5 trust and admission boundaries
+
+Dynamic destinations are exact operator-configured host/port pairs; DNS remains trusted. Reserved console/admin routes cannot fall through to upstreams. The shared connector disables redirects in proxy and health requests, does not retain cookies and preserves compressed bytes. Admission uses a cancellation-safe bounded semaphore; SQLite operations explicitly close connections. See [release boundaries](docs/release.md).
