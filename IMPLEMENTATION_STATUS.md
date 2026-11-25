@@ -50,4 +50,5 @@ Status reflects the repository contents, not planned behavior.
 - Implemented bounded congestion forecasting, predictive scoring, rolling backend/class fingerprints, class-aware eligibility, SLO feedback, objective blending, cooldown, rollback and optional contextual exploration.
 - Added authenticated intelligence/autopilot endpoints, sampled recovery ramping, retry protection after streaming starts, and retry exclusion of previously attempted backends.
 - Added focused regression tests; the GitHub connector cannot execute Python and the local environment cannot clone GitHub. No new test results or performance gains are claimed.
-- Remaining: controlled predictive/reactive comparison, sustainable capacity identification, complete client SLO accounting, forecast calibration, comprehensive recovery/learning tests and validation.
+- Remaining: controlled predictive/reactive comparison, sustainable capacity identification, complete client SLO accounting (admission rejection and some transport errors now captured), forecast calibration, comprehensive recovery/learning tests and validation.
+- Added a reproducible synthetic comparison runner: `python -m benchmarks.compare_predictive --seeds 7 11 23`. It has not been executed here; the simulator currently observes outcomes at dispatch rather than completion.

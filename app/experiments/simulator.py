@@ -8,7 +8,7 @@ import statistics
 from collections import Counter
 from dataclasses import asdict, dataclass
 
-from app.config import AdaptiveConfig
+from app.config import AdaptiveConfig, IntelligenceConfig
 from app.control.controller import AdaptiveController
 from app.models.backend import Backend, BackendRegistry
 from app.routing.adaptive import AdaptiveStrategy
@@ -52,15 +52,17 @@ class RoutingSimulation:
         controller = AdaptiveController(
             registry,
             telemetry,
-            AdaptiveConfig(interval=1, slow_start_seconds=0, smoothing=0.5),
+            AdaptiveConfig(interval=0.025, slow_start_seconds=0, smoothing=0.5,
+                           intelligence=IntelligenceConfig(enabled=strategy_name == "predictive",
+                                                           horizon_seconds=0.1)),
         )
-        controller.publish()
-        if strategy_name == "adaptive":
+        controller.publish(now=0.0)
+        if strategy_name in {"adaptive", "predictive"}:
             strategy: LoadBalancingStrategy = AdaptiveStrategy(controller, random.Random(seed))
         elif strategy_name == "latency_aware":
             strategy = LatencyAwareStrategy(capacity_factor=20)
         else:
-            raise ValueError("strategy must be adaptive or latency_aware")
+            raise ValueError("strategy must be adaptive, predictive or latency_aware")
 
         completions: dict[str, list[float]] = {backend.id: [] for backend in registry.list_all()}
         latencies: list[float] = []
@@ -107,7 +109,7 @@ class RoutingSimulation:
                     errors += 1
                 latencies.append(latency)
                 if request_index % 25 == 0:
-                    controller.publish()
+                    controller.publish(now=now)
 
         ordered = sorted(latencies)
         return SimulationResult(

@@ -177,6 +177,13 @@ class AdaptiveController:
                 "predictions": self.intelligence.predictions,
                 "fingerprints": self.intelligence.fingerprints,
                 "autopilot": self.autopilot.to_dict(), "weights": self._weights,
+                "policy_version": self.snapshot.version,
+                "targets": {
+                    "p99_seconds": self.intelligence.config.p99_target_seconds,
+                    "error_rate": self.intelligence.config.error_target,
+                    "availability": self.intelligence.config.availability_target,
+                    "success_rps": self.intelligence.config.throughput_target,
+                },
                 "slo": self.intelligence.slo(time.monotonic())}
 
     def configure_autopilot(self, objective: str, enabled: bool, learning: bool) -> None:

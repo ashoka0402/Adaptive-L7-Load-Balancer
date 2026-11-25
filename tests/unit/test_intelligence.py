@@ -30,7 +30,8 @@ def test_prediction_shifts_traffic():
         registry.add(Backend(name, "host", 8000, capacity=20))
     telemetry = TelemetryPipeline()
     controller = AdaptiveController(registry, telemetry, AdaptiveConfig(
-        slow_start_seconds=0, smoothing=1, intelligence=IntelligenceConfig(enabled=True)
+        slow_start_seconds=0, smoothing=1, max_probability_step=1,
+        intelligence=IntelligenceConfig(enabled=True)
     ))
     for tick, load in enumerate([2, 4, 6, 8, 10]):
         registry.backends["a"].active_connections = load
@@ -86,3 +87,28 @@ async def test_class_selection_respects_candidates():
     strategy = AdaptiveStrategy(controller)
     assert await strategy.select_for_class([b], "compute") is b
     assert await strategy.select_for_class([], "compute") is None
+
+
+def test_recovery_resets_prediction_window():
+    engine = Intelligence(IntelligenceConfig(enabled=True))
+    for tick in range(5):
+        engine.sample("a", now=float(tick), connections=tick * 2, queue=0,
+                      capacity=10, latency=.01, error_rate=0, available=True)
+    engine.sample("a", now=5, connections=0, queue=0, capacity=10, latency=.1,
+                  error_rate=1, available=False)
+    recovered = engine.sample("a", now=6, connections=0, queue=0, capacity=10,
+                              latency=.01, error_rate=0, available=True)
+    assert recovered["recovery_age"] == 0
+    assert recovered["confidence"] == 0
+    assert recovered["risk"] == 0
+
+
+def test_learning_does_not_explore_while_slo_is_violated():
+    cfg = IntelligenceConfig(enabled=True, autopilot=True, learning=True, policy_cooldown=1)
+    pilot = Autopilot(cfg)
+    weights = dict(zip(KEYS, (.35, .25, .15, .20, .05)))
+    slo = {"samples": 100, "p99_seconds": .02, "error_rate": .10,
+           "availability": .90, "success_rps_lower_bound": 50}
+    pilot.update(0, weights, weights, slo, .2)
+    assert pilot.last_arm is None
+    assert "reliability" in pilot.reason

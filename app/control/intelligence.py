@@ -17,6 +17,7 @@ def percentile(values: list[float], q: float) -> float:
 @dataclass
 class Trend:
     points: deque[tuple[float, float]]
+    latency_points: deque[tuple[float, float]]
     available: bool = False
     recovered_at: float = 0.0
 
@@ -72,14 +73,18 @@ class Intelligence:
                capacity: float, latency: float, error_rate: float,
                available: bool) -> dict[str, float]:
         if backend not in self.trends:
-            self.trends[backend] = Trend(deque(maxlen=self.config.trend_points))
+            self.trends[backend] = Trend(
+                deque(maxlen=self.config.trend_points), deque(maxlen=self.config.trend_points)
+            )
         trend = self.trends[backend]
         if available and not trend.available:
             trend.recovered_at = now
             trend.points.clear()
+            trend.latency_points.clear()
         trend.available = available
         pressure = (connections + queue) / max(1.0, capacity)
         trend.points.append((now, pressure))
+        trend.latency_points.append((now, latency))
         points = list(trend.points)
         slope, confidence = 0.0, 0.0
         if len(points) >= 3:
@@ -96,7 +101,12 @@ class Intelligence:
         forecast = max(0.0, pressure + slope * self.config.horizon_seconds)
         risk = min(1.0, max(0.0, forecast - self.config.congestion_threshold)
                    / (1 - self.config.congestion_threshold)) * confidence
+        latency_points = list(trend.latency_points)
+        elapsed = latency_points[-1][0] - latency_points[0][0]
+        latency_slope = ((latency_points[-1][1] - latency_points[0][1]) / elapsed
+                         if elapsed > 0 else 0.0)
         result = {"pressure": pressure, "forecast": forecast, "slope_per_second": slope,
+                  "latency_slope_ms_per_second": latency_slope * 1000,
                   "confidence": confidence, "risk": risk, "latency_ms": latency * 1000,
                   "error_rate": error_rate, "recovery_age": max(0.0, now - trend.recovered_at)}
         self.predictions[backend] = result

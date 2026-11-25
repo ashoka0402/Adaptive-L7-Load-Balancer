@@ -76,9 +76,12 @@ class ReverseProxy:
             )
 
         # Backpressure
+        started = time.monotonic()
         if not await self.backpressure.acquire():
             metrics.REJECTED.inc()
             metrics.QUEUE_SIZE.set(self.backpressure.queue_size)
+            if isinstance(self.strategy, AdaptiveStrategy):
+                self.strategy.controller.intelligence.observe_client(time.monotonic() - started, False)
             return web.json_response({"error": "service overloaded"}, status=503)
 
         metrics.ACTIVE_REQUESTS.inc()
@@ -98,8 +101,12 @@ class ReverseProxy:
                 )
             response = await self._proxy(request, ctx)
             if isinstance(self.strategy, AdaptiveStrategy):
-                self.strategy.controller.intelligence.observe_client(ctx.elapsed, response.status < 500)
+                self.strategy.controller.intelligence.observe_client(time.monotonic() - started, response.status < 500)
             return response
+        except (asyncio.CancelledError, aiohttp.ClientError, OSError, TimeoutError):
+            if isinstance(self.strategy, AdaptiveStrategy):
+                self.strategy.controller.intelligence.observe_client(time.monotonic() - started, False)
+            raise
         finally:
             self.backpressure.release()
             metrics.ACTIVE_REQUESTS.dec()
@@ -115,6 +122,8 @@ class ReverseProxy:
             if backend is None:
                 metrics.FAILED_REQUESTS.inc()
                 metrics.REQUESTS_TOTAL.labels(method=ctx.method, status="503").inc()
+                if ctx.attempted_backend_ids:
+                    return web.json_response({"error": "bad gateway"}, status=502)
                 return web.json_response({"error": "no available backends"}, status=503)
 
             ctx.backend_id = backend.id

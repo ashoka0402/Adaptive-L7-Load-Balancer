@@ -18,7 +18,7 @@ PRESETS = {
 class Autopilot:
     def __init__(self, config: IntelligenceConfig) -> None:
         self.config = config
-        self.objective = config.objective
+        self.objective: str = config.objective
         self.enabled, self.learning = config.autopilot, config.learning
         self.history: deque[dict] = deque(maxlen=100)
         self.last_change = float("-inf")
@@ -34,7 +34,9 @@ class Autopilot:
         if objective not in {*PRESETS, "custom"} or (learning and not enabled):
             raise ValueError("invalid objective or feature flags")
         self.objective, self.enabled, self.learning = objective, enabled, learning
-        self.last_loss = self.previous = self.last_arm = None
+        self.last_loss = None
+        self.previous = None
+        self.last_arm = None
         self.last_change = float("-inf")
 
     def update(self, now: float, current: dict[str, float], base: dict[str, float],
@@ -51,13 +53,16 @@ class Autopilot:
         context = "congested" if pressure >= .8 else "normal"
         if self.last_arm is not None:
             n, reward = self.arms.get(self.last_arm, (0, 0.0))
-            self.arms[self.last_arm] = (n + 1, reward + (-loss - reward) / (n + 1))
+            # Distinguish healthy policies as well as SLO-violating policies.
+            observed_reward = -loss - min(5.0, latency) - min(5.0, errors)
+            self.arms[self.last_arm] = (n + 1, reward + (observed_reward - reward) / (n + 1))
         self.last_arm = None
         if self.last_loss is not None and self.previous is not None and loss > self.last_loss + cfg.rollback_margin:
             result = self.previous.copy()
             self.reason = "rollback: observed SLO loss increased"
             self.cooldown_until = now + 2 * cfg.policy_cooldown
-            self.last_loss = self.previous = None
+            self.last_loss = None
+            self.previous = None
         else:
             objective = self.objective
             if errors > 1 or availability > 0:

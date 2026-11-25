@@ -17,7 +17,8 @@ violations. This feedback is observational, not causal evidence of improvement.
 
 Fingerprints report observed latency/error distributions, peak concurrency and
 successful RPS lower bounds, not maximum sustainable capacity. Client SLOs cover
-completed adaptive proxy responses, not admission rejections or disconnects.
+completed adaptive proxy responses, admission rejections and some transport errors;
+not all disconnects or admission cancellation paths are observed.
 Availability means response success fraction, not uptime. Recovery ramping follows
 sampled availability transitions. Retries cannot repeat a tried backend or continue
 after a response starts.
