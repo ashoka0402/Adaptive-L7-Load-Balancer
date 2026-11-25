@@ -43,3 +43,6 @@ ignore_missing_imports = true
 
 [tool.setuptools.packages.find]
 include = ["app*", "backends*"]
+
+[tool.setuptools.package-data]
+"app.ui" = ["static/*.html", "static/*.css", "static/*.js"]

@@ -14,6 +14,7 @@ from aiohttp import web
 from app.metrics import prometheus as metrics
 from app.models.request import RequestContext
 from app.routing.adaptive import AdaptiveStrategy
+from app.ui.telemetry import ConsoleTelemetry
 
 if TYPE_CHECKING:
     from app.config import AppConfig
@@ -57,6 +58,7 @@ class ReverseProxy:
         backpressure: BackpressureController,
         telemetry: TelemetryPipeline,
         shadow: LiveShadow | None = None,
+        console: ConsoleTelemetry | None = None,
     ) -> None:
         self.config = config
         self.registry = registry
@@ -68,6 +70,7 @@ class ReverseProxy:
         self.backpressure = backpressure
         self.telemetry = telemetry
         self.shadow = shadow
+        self.console = console if console is not None else ConsoleTelemetry()
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
         # Metrics path short-circuit
@@ -85,6 +88,7 @@ class ReverseProxy:
             metrics.QUEUE_SIZE.set(self.backpressure.queue_size)
             if isinstance(self.strategy, AdaptiveStrategy):
                 self.strategy.controller.intelligence.observe_client(time.monotonic() - started, False)
+            self.console.record(time.monotonic() - started, False)
             return web.json_response({"error": "service overloaded"}, status=503)
 
         metrics.ACTIVE_REQUESTS.inc()
@@ -97,12 +101,14 @@ class ReverseProxy:
         )
         ctx.hop_headers = self._connection_tokens(request.headers.getall("Connection", []))
 
+        success = False
         try:
             if isinstance(self.strategy, AdaptiveStrategy):
                 ctx.request_class, ctx.eligible_backend_ids = self.strategy.controller.intelligence.classify(
                     ctx.method, ctx.path, ctx.headers
                 )
             response = await self._proxy(request, ctx)
+            success = response.status < 500
             if isinstance(self.strategy, AdaptiveStrategy):
                 self.strategy.controller.intelligence.observe_client(time.monotonic() - started, response.status < 500)
             return response
@@ -111,6 +117,7 @@ class ReverseProxy:
                 self.strategy.controller.intelligence.observe_client(time.monotonic() - started, False)
             raise
         finally:
+            self.console.record(time.monotonic() - started, success)
             self.backpressure.release()
             metrics.ACTIVE_REQUESTS.dec()
             metrics.QUEUE_SIZE.set(self.backpressure.queue_size)
@@ -236,6 +243,8 @@ class ReverseProxy:
             policy = self.strategy.policy_for(selected.id)
             if policy:
                 ctx.routing_reason = f"{policy.explanation}; class={ctx.request_class}"
+        if selected is not None:
+            self.console.decision(selected.id, ctx.routing_reason or self.config.load_balancing.strategy, ctx.request_class)
         if selected is not None and self.shadow is not None:
             self.shadow.observe(selected, candidates)
         return selected

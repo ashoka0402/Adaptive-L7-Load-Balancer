@@ -142,6 +142,7 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
     capacity_area = {n.id: 0.0 for n in spec.nodes}
     peak_queue = 0
     successes = 0
+    routed: Counter[str] = Counter()
 
     def event(t: float, priority: int, kind: str, payload: object) -> None:
         nonlocal sequence
@@ -236,6 +237,7 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
                     finish(rid, arrival, cls, None, "dropped")
                 else:
                     total_active += 1
+                    routed[node.spec.id] += 1
                     node.queue.append((rid, arrival, cls))
                     event(arrival+spec.timeout_ms/1000, 1, "timeout", (node.spec.id,rid,arrival,cls))
                     pump(node)
@@ -270,11 +272,13 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
             if current <= spec.duration+spec.warmup or len(completed_ids) < len(arrivals):
                 frame = {"time": current, "completed": len(rows), "offered": len(arrivals),
                          "nodes": {bid: {"active": len(n.active), "queue": len(n.queue),
-                                         "capacity": n.capacity, "down": n.down,
-                                         "probability": snapshot.policies[bid].probability if bid in snapshot.policies else 0}
+                                         "capacity": n.capacity, "down": n.down, "routed": routed[bid],
+                                         "probability": (snapshot.policies[bid].probability if bid in snapshot.policies else 0) if algorithm in ADAPTIVE else None}
                                    for bid,n in nodes.items()},
                          "successes": successes,
-                         "policy_version": snapshot.version}
+                         "policy_version": snapshot.version, "weights": weights.copy(),
+                         "predictions": dict(controller.intelligence.predictions),
+                         "reason": controller.autopilot.reason}
                 timeline.append(frame)
                 await progress(frame)
         if processed % 256 == 0:

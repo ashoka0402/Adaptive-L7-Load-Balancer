@@ -32,6 +32,8 @@ from app.routing.least_connections import LeastConnectionsStrategy
 from app.routing.round_robin import RoundRobinStrategy
 from app.routing.weighted_round_robin import WeightedRoundRobinStrategy
 from app.telemetry.pipeline import TelemetryPipeline
+from app.ui.routes import setup_console
+from app.ui.telemetry import ConsoleTelemetry
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,7 @@ class LoadBalancerApp:
                 self.store = None
         self.experiments = ExperimentManager(self.store)
         self.shadow = LiveShadow(config.shadow)
+        self.console = ConsoleTelemetry()
         self.controller = AdaptiveController(
             self.registry, self.telemetry, config.adaptive, self.store
         )
@@ -119,6 +122,7 @@ class LoadBalancerApp:
             self.backpressure,
             self.telemetry,
             self.shadow,
+            self.console,
         )
 
         self.app = web.Application(client_max_size=self.config.request.max_body_size)
@@ -128,6 +132,7 @@ class LoadBalancerApp:
         self.app[TELEMETRY_KEY] = self.telemetry
         setup_admin_routes(self.app)
         setup_experiment_routes(self.app, self.experiments, self.shadow)
+        setup_console(self.app, self.console, self.backpressure)
         self.app.router.add_route("*", "/{path:.*}", self.proxy.handle)
 
         self.runner = web.AppRunner(self.app, access_log=None)

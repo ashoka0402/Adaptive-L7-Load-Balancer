@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="description" content="Pulse — adaptive traffic intelligence. Observe, disrupt, and replay real routing experiments.">
+<title>Pulse / Traffic Intelligence</title>
+<link rel="stylesheet" href="/pulse/assets/style.css">
+<script type="module" src="/pulse/assets/app.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div id="app">
+<aside class="sidebar" aria-label="Primary navigation">
+<a class="brand" href="#home" aria-label="Pulse home"><svg viewBox="0 0 40 40" aria-hidden="true"><rect x="1" y="1" width="38" height="38" rx="11"/><path d="M7 22h7l4-11 5 18 4-7h6"/></svg><span>PULSE<small>TRAFFIC INTELLIGENCE</small></span></a>
+<div class="workspace"><i class="status-dot"></i><span>Local workspace<small>ENGINE / v2.0</small></span></div>
+<nav id="nav"></nav>
+<div class="sidebar-footer"><span class="eyebrow">ENGINEERING CONSOLE</span><a href="https://github.com/ashoka0402/Adaptive-L7-Load-Balancer" target="_blank" rel="noopener noreferrer">Source repository ↗</a><button id="theme" class="quiet" type="button">Switch theme</button></div>
+</aside>
+<div class="shell">
+<header class="topbar"><button class="icon-btn mobile-only" id="menu" aria-label="Toggle navigation">☰</button><span id="breadcrumb">Pulse / Overview</span><div class="top-actions"><span id="connection" class="connection"><i></i> Not connected</span><button id="auth-button" class="button compact">Connect engine</button></div></header>
+<main id="main" tabindex="-1"></main>
+<footer class="footnote"><span>Pulse · Observe / Adapt / Verify</span><span id="clock"></span></footer>
+</div>
+</div>
+<dialog id="auth-dialog" aria-labelledby="auth-title"><form id="auth-form"><div class="eyebrow">CONTROL PLANE / AUTH</div><h2 id="auth-title">Connect to Pulse</h2><p>Enter your local engine's admin token. It stays in this page's memory and is sent only to this origin.</p><label for="token">Admin token</label><input id="token" type="password" autocomplete="off" required minlength="16"><div class="dialog-actions"><button type="button" class="button secondary" id="close-auth">Cancel</button><button class="button" type="submit">Connect</button></div><p id="auth-error" role="alert"></p></form></dialog>
+<div id="notice" role="status" aria-live="polite"></div>
+<noscript>Pulse requires JavaScript to display and control experiments.</noscript>
+</body>
+</html>
