@@ -147,3 +147,7 @@ Licensed under MIT.
 [![Pulse verification](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions/workflows/verify.yml/badge.svg)](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions/workflows/verify.yml)
 
 GitHub Actions executes the full test suite on Python 3.12/3.13, Ruff, mypy, and an actual seeded Arena simulation; reports are downloadable as workflow artifacts. See [Lab, Chaos, Arena and Replay](docs/experiments.md) for API and isolated benchmark instructions.
+
+## Pulse visual console
+
+Open **[http://localhost:8080/pulse/](http://localhost:8080/pulse/)** after starting the engine. Enter your configured admin token to connect. The console includes a live traffic fabric, experiment cockpit, synchronized algorithm battles, fault scheduling, recorded replay, Autopilot, backend intelligence and a responsive dark/light interface. See [console documentation](docs/console.md) and the real browser evidence in [GitHub Actions](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions).

@@ -93,6 +93,7 @@ async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
             start = time.monotonic()
             tasks: set[asyncio.Task] = set()
             arrivals = trace(spec,seed)
+            routed: dict[str, int] = {bid: 0 for bid in nodes}
 
             async def send(rid: int, at: float, cls: str) -> None:
                 begun = time.monotonic()
@@ -103,6 +104,8 @@ async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
                         await response.read()
                         status = "ok" if response.status < 400 else "error"
                         bid = response.headers.get("x-backend-id")
+                        if bid in routed:
+                            routed[bid] += 1
                 except TimeoutError:
                     status = "timeout"
                 except (aiohttp.ClientError,OSError):
@@ -128,7 +131,7 @@ async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
                         tasks.add(asyncio.create_task(send(rid,at,cls)))
                     if rid % max(1,spec.rps//5)==0:
                         frame={"time":time.monotonic()-start,"completed":len(rows),"offered":len(arrivals),
-                               "nodes":{bid:{"active":in_flight[bid],"down":n.down,"capacity":n.capacity}
+                               "nodes":{bid:{"active":in_flight[bid],"down":n.down,"capacity":n.capacity,"routed":routed[bid]}
                                         for bid,n in nodes.items()}}
                         timeline.append(frame)
                         await progress(frame)

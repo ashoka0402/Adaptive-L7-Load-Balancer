@@ -43,3 +43,30 @@ jobs:
       - name: Type check (also report when lint fails)
         if: always()
         run: mypy app
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax and pure data transformations
+        run: |
+          node --check app/ui/static/app.js
+          node --check app/ui/static/model.js
+          node --test frontend_tests/model.test.mjs
+      - run: python -m pip install -e '.[dev]' playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Exercise the actual console against the real backend
+        run: python -m pytest browser_tests -ra --strict-markers --junitxml=reports/browser.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pulse-console-browser-evidence
+          path: reports/

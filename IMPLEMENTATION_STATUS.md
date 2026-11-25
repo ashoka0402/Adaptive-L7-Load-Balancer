@@ -62,3 +62,10 @@ Status reflects the repository contents, not planned behavior.
 CI history: initial pre-Phase-3 workflow reported 43 passing tests on both Python versions, but lint failed. Initial Phase 3 run reported 49 passing tests and one invalid HTTP fixture configuration; the fixture now explicitly specifies allowed concurrency while keeping the original assertions. Subsequent CI is authoritative for the updated code.
 
 Phase 3 follow-up: added opt-in sampled live baseline shadow decisions and a dedicated offline Docker Compose benchmark runner. Shadow estimates are observational, not measured counterfactuals. Docker runtime verification, independent resource profiling, calibrated counterfactual estimates, OS-level network/resource faults and automated performance-regression detection remain open.
+
+## Phase 4 implementation (CI verification pending)
+
+- Added responsive product landing and operating console: live topology, charts, Traffic Lab, Arena, Chaos, replay, Autopilot, backend intelligence, observability and configuration. UI reads real APIs and labels simulated versus measured data; token is memory-only.
+- Added bounded instance-local client telemetry and sampled routing explanations; simulation frames expose routing counts and policy metadata. HTTP frames expose completion counts.
+- Added authenticated console integration tests, JavaScript model tests, real Chromium UI tests, and screenshot artifacts in CI. The prior Phase 3 commit's workflow completed successfully; verify the Phase 4 workflow separately.
+- Remaining: runtime SLO editing beyond experiment specifications, full browser/visual validation, production deployment hardening and the Phase 3 limitations documented above.

@@ -86,3 +86,7 @@ See [ADR 0003](docs/adr/0003-predictive-autopilot.md). Bounded trend forecasting
 ## Phase 3 experiments
 
 See [Lab and Arena API](docs/experiments.md). The experiment manager owns bounded, isolated runs with deterministic traces, simulated completion events, optional loopback HTTP execution, lifecycle controls and SQLite retention. No experiment accepts external target addresses.
+
+## Phase 4 console
+
+A same-origin static console at `/pulse/` consumes existing authenticated APIs and a new instance-local `/admin/console` endpoint. A bounded outcome window provides actual client latency/error observations for all routing strategies, independently of global Prometheus metrics. Canvas topology animation uses backend counter deltas and recorded experiment frames; SVG time series are derived from observations. No frontend build or additional network service is required. See [console documentation](docs/console.md).
