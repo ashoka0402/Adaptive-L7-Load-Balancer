@@ -23,14 +23,20 @@ from app.experiments.spec import ExperimentSpec, trace
 from app.models.backend import Backend
 
 
+def loopback_port(runner: web.AppRunner) -> int:
+    address = runner.addresses[0]
+    if not isinstance(address, tuple) or address[0] != "127.0.0.1":
+        raise RuntimeError("benchmark listener must be bound to IPv4 loopback")
+    return int(address[1])
+
+
 async def listener(app: web.Application, stack: AsyncExitStack) -> int:
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     stack.push_async_callback(runner.cleanup)
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
-    assert site._server is not None and site._server.sockets
-    return site._server.sockets[0].getsockname()[1]
+    return loopback_port(runner)
 
 
 async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Progress) -> dict:
@@ -71,7 +77,7 @@ async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
         config = AppConfig(
             server=ServerConfig(host="127.0.0.1", port=0, admin_token=secrets.token_hex(24)),
             backends=configs, persistence=PersistenceConfig(enabled=False),
-            load_balancing=LoadBalancingConfig(strategy="adaptive" if algorithm in ADAPTIVE else algorithm),
+            load_balancing=LoadBalancingConfig.model_validate({"strategy":"adaptive" if algorithm in ADAPTIVE else algorithm}),
             adaptive=adaptive_config(algorithm,seed,spec),
             health_check=HealthCheckConfig(interval=.2, timeout=.5, failure_threshold=1),
             backpressure=BackpressureConfig(max_concurrent_requests=spec.concurrency, max_queue_size=spec.concurrency),
@@ -79,8 +85,8 @@ async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
         pulse = LoadBalancerApp(config)
         await pulse.start()
         stack.push_async_callback(pulse.stop)
-        assert pulse.site is not None and pulse.site._server is not None and pulse.site._server.sockets
-        port = pulse.site._server.sockets[0].getsockname()[1]
+        assert pulse.runner is not None
+        port = loopback_port(pulse.runner)
         timeout = aiohttp.ClientTimeout(total=spec.timeout_ms/1000)
         connector = aiohttp.TCPConnector(limit=spec.concurrency)
         async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:

@@ -57,9 +57,13 @@ def default_nodes() -> list[NodeSpec]:
             NodeSpec(id="b3", capacity=8, latency_ms=30)]
 
 
+def default_algorithms() -> list[Algorithm]:
+    return ["round_robin", "adaptive"]
+
+
 class ExperimentSpec(StrictModel):
     mode: Literal["simulation", "http"] = "simulation"
-    algorithms: list[Algorithm] = Field(default_factory=lambda: ["round_robin", "adaptive"], min_length=1, max_length=8)
+    algorithms: list[Algorithm] = Field(default_factory=default_algorithms, min_length=1, max_length=8)
     nodes: list[NodeSpec] = Field(default_factory=default_nodes, min_length=1, max_length=8)
     seed: int = Field(default=7, ge=0, le=2**31-1)
     repetitions: int = Field(default=1, ge=1, le=5)
@@ -109,7 +113,7 @@ def trace(spec: ExperimentSpec, seed: int) -> list[tuple[float, str]]:
     result: list[tuple[float, str]] = []
     end = spec.duration + spec.warmup
     now = 0.0
-    while now < end and len(result) < (spec.total_requests or 20000):
+    while round(now, 9) < round(end, 9) and len(result) < (spec.total_requests or 20000):
         request_class = rng.choice(["light", "compute", "database", "streaming"]) if spec.pattern == "mixed" else "light"
         result.append((round(now, 9), request_class))
         fraction = now / end

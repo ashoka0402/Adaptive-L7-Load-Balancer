@@ -42,9 +42,11 @@ def adaptive_config(name: str, seed: int, spec: ExperimentSpec) -> AdaptiveConfi
 def strategy(name: str, controller: AdaptiveController, seed: int) -> LoadBalancingStrategy:
     if name in ADAPTIVE:
         return AdaptiveStrategy(controller, random.Random(seed))
-    return {"round_robin": RoundRobinStrategy, "weighted_round_robin": WeightedRoundRobinStrategy,
-            "least_connections": LeastConnectionsStrategy,
-            "latency_aware": LatencyAwareStrategy}[name]()
+    factories: dict[str, Callable[[], LoadBalancingStrategy]] = {
+        "round_robin": RoundRobinStrategy, "weighted_round_robin": WeightedRoundRobinStrategy,
+        "least_connections": LeastConnectionsStrategy, "latency_aware": LatencyAwareStrategy,
+    }
+    return factories[name]()
 
 
 @dataclass
@@ -82,7 +84,7 @@ def service(node: Node, seed: int, request_id: int, request_class: str) -> tuple
     # Independent random numbers for each request/backend pair across algorithms.
     key = f"{seed}:{request_id}:{node.spec.id}".encode()
     rng = random.Random(int.from_bytes(hashlib.sha256(key).digest()[:8], "big"))
-    ms = node.spec.latency_ms * node.spec.class_multipliers.get(request_class, 1)
+    ms = node.spec.latency_ms * next((value for name, value in node.spec.class_multipliers.items() if name == request_class), 1.0)
     return (ms * rng.uniform(.9, 1.1) + node.extra_ms) / 1000, rng.random() >= node.error_rate
 
 
@@ -259,8 +261,8 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
                                       cpu=min(1,len(node.active)/node.capacity), now=current)
         if kind == "tick":
             snapshot = controller.publish(now=current)
-            for other in shadow_controllers.values():
-                other.publish(now=current)
+            for shadow_controller in shadow_controllers.values():
+                shadow_controller.publish(now=current)
             weights = controller.intelligence_status()["weights"]
             if weights != last_weights:
                 policy_changes += 1
