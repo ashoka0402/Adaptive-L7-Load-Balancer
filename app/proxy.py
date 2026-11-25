@@ -92,7 +92,14 @@ class ReverseProxy:
         ctx.hop_headers = self._connection_tokens(request.headers.getall("Connection", []))
 
         try:
-            return await self._proxy(request, ctx)
+            if isinstance(self.strategy, AdaptiveStrategy):
+                ctx.request_class, ctx.eligible_backend_ids = self.strategy.controller.intelligence.classify(
+                    ctx.method, ctx.path, ctx.headers
+                )
+            response = await self._proxy(request, ctx)
+            if isinstance(self.strategy, AdaptiveStrategy):
+                self.strategy.controller.intelligence.observe_client(ctx.elapsed, response.status < 500)
+            return response
         finally:
             self.backpressure.release()
             metrics.ACTIVE_REQUESTS.dec()
@@ -111,6 +118,7 @@ class ReverseProxy:
                 return web.json_response({"error": "no available backends"}, status=503)
 
             ctx.backend_id = backend.id
+            ctx.attempted_backend_ids.add(backend.id)
             backend.active_connections += 1
             metrics.BACKEND_ACTIVE.labels(backend=backend.id).set(backend.active_connections)
 
@@ -122,13 +130,13 @@ class ReverseProxy:
 
                 if status >= 500:
                     self.passive.record_failure(backend, status_code=status)
-                    self.telemetry.record(backend.id, latency, False)
+                    self._record(ctx, backend, latency, False)
                     self.circuit.on_failure(backend)
                     metrics.BACKEND_REQUESTS.labels(backend=backend.id, result="error").inc()
                     # The response is already streamed; retrying here would corrupt it.
                 else:
                     self.passive.record_success(backend, latency)
-                    self.telemetry.record(backend.id, latency, True)
+                    self._record(ctx, backend, latency, True)
                     self.circuit.on_success(backend)
                     metrics.BACKEND_REQUESTS.labels(backend=backend.id, result="ok").inc()
 
@@ -146,9 +154,11 @@ class ReverseProxy:
                 latency = time.monotonic() - start
                 metrics.TIMEOUTS.inc()
                 self.passive.record_failure(backend, is_timeout=True)
-                self.telemetry.record(backend.id, latency, False)
+                self._record(ctx, backend, latency, False)
                 self.circuit.on_failure(backend)
                 metrics.BACKEND_REQUESTS.labels(backend=backend.id, result="timeout").inc()
+                if ctx.response_started:
+                    raise
                 if self.retry_policy.should_retry(ctx, is_connection_error=True):
                     ctx.retry_count += 1
                     metrics.RETRIES.inc()
@@ -157,12 +167,14 @@ class ReverseProxy:
             except (aiohttp.ClientError, OSError) as exc:
                 latency = time.monotonic() - start
                 self.passive.record_failure(backend, is_timeout=False)
-                self.telemetry.record(backend.id, latency, False)
+                self._record(ctx, backend, latency, False)
                 self.circuit.on_failure(backend)
                 metrics.BACKEND_REQUESTS.labels(backend=backend.id, result="error").inc()
                 logger.warning(
                     "backend request failed backend=%s type=%s", backend.id, type(exc).__name__
                 )
+                if ctx.response_started:
+                    raise
                 if self.retry_policy.should_retry(ctx, is_connection_error=True):
                     ctx.retry_count += 1
                     metrics.RETRIES.inc()
@@ -178,13 +190,30 @@ class ReverseProxy:
         self._log(ctx, 502, ctx.elapsed)
         return web.json_response({"error": "bad gateway", "request_id": ctx.request_id}, status=502)
 
+    def _record(self, ctx: RequestContext, backend: Backend, latency: float, success: bool) -> None:
+        if self.registry.get(backend.id) is not backend:
+            return
+        self.telemetry.record(backend.id, latency, success)
+        if isinstance(self.strategy, AdaptiveStrategy):
+            self.strategy.controller.intelligence.observe(
+                backend.id, ctx.request_class, latency, success, backend.active_connections
+            )
+
     async def _select(self, ctx: RequestContext) -> Backend | None:
         candidates = [
-            backend for backend in self.registry.healthy() if self.circuit.can_attempt(backend)
+            backend for backend in self.registry.healthy()
+            if self.circuit.can_attempt(backend)
+            and (not ctx.eligible_backend_ids or backend.id in ctx.eligible_backend_ids)
         ]
+        if ctx.attempted_backend_ids:
+            candidates = [b for b in candidates if b.id not in ctx.attempted_backend_ids]
         selected = None
+        ctx.routing_reason = ""
         while candidates:
-            candidate = await self.strategy.select_backend(candidates)
+            if isinstance(self.strategy, AdaptiveStrategy):
+                candidate = await self.strategy.select_for_class(candidates, ctx.request_class)
+            else:
+                candidate = await self.strategy.select_backend(candidates)
             if candidate is None:
                 break
             if self.circuit.allow_request(candidate):
@@ -194,7 +223,7 @@ class ReverseProxy:
         if selected is not None and isinstance(self.strategy, AdaptiveStrategy):
             policy = self.strategy.policy_for(selected.id)
             if policy:
-                ctx.routing_reason = policy.explanation
+                ctx.routing_reason = f"{policy.explanation}; class={ctx.request_class}"
         return selected
 
     async def _forward(
@@ -243,6 +272,7 @@ class ReverseProxy:
             if ctx.routing_reason:
                 resp.headers["x-pulse-route"] = ctx.routing_reason
 
+            ctx.response_started = True
             await resp.prepare(request)
 
             async for chunk in backend_resp.content.iter_chunked(64 * 1024):

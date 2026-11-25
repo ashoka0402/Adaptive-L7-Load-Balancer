@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from app.config import AdaptiveConfig
+from app.control.autopilot import Autopilot
+from app.control.intelligence import Intelligence
 from app.models.backend import BackendRegistry
 from app.telemetry.pipeline import TelemetryPipeline
 
@@ -67,6 +69,10 @@ class AdaptiveController:
         self.config = config
         self.store = store
         self._weights = config.weights.model_dump()
+        self._base_weights = self._weights.copy()
+        self.intelligence = Intelligence(config.intelligence)
+        self.autopilot = Autopilot(config.intelligence)
+        self._last_intelligence_sample = float('-inf')
         self._snapshot = RoutingPolicySnapshot(0, time.time(), MappingProxyType({}))
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
@@ -88,6 +94,9 @@ class AdaptiveController:
         ):
             raise ValueError("weights must be non-negative with a positive total")
         self._weights = updated
+        self._base_weights = updated.copy()
+        self.autopilot.last_loss = None
+        self.autopilot.previous = None
         self.publish()
 
     async def start(self) -> None:
@@ -163,8 +172,40 @@ class AdaptiveController:
                 projected[key] += delta * room[key] / total_room
         return projected
 
-    def publish(self) -> RoutingPolicySnapshot:
+    def intelligence_status(self) -> dict:
+        return {"enabled": self.intelligence.config.enabled,
+                "predictions": self.intelligence.predictions,
+                "fingerprints": self.intelligence.fingerprints,
+                "autopilot": self.autopilot.to_dict(), "weights": self._weights,
+                "slo": self.intelligence.slo(time.monotonic())}
+
+    def configure_autopilot(self, objective: str, enabled: bool, learning: bool) -> None:
+        if not self.intelligence.config.enabled:
+            raise ValueError("intelligence disabled")
+        self.autopilot.configure(objective, enabled, learning)
+        if not enabled:
+            self._weights = self._base_weights.copy()
+        self.publish()
+
+    def publish(self, *, now: float | None = None) -> RoutingPolicySnapshot:
+        now = time.monotonic() if now is None else now
         backends = self.registry.available()
+        intelligence = self.intelligence
+        if intelligence.config.enabled and now - self._last_intelligence_sample >= self.config.interval:
+            self._last_intelligence_sample = now
+            for backend in self.registry.list_all():
+                observed = self.telemetry.snapshot(backend.id, backend.average_latency or 0.05)
+                intelligence.sample(
+                    backend.id, now=now, connections=backend.active_connections,
+                    queue=observed.queue_depth, capacity=backend.capacity,
+                    latency=observed.latency, error_rate=observed.error_rate,
+                    available=backend.is_available,
+                )
+            intelligence.summarize(now, {b.id for b in self.registry.list_all()})
+            pressure = max((p["pressure"] for p in intelligence.predictions.values()), default=0.0)
+            self._weights = self.autopilot.update(
+                now, self._weights, self._base_weights, intelligence.slo(now), pressure
+            )
         if not backends:
             snapshot = RoutingPolicySnapshot(
                 self._snapshot.version + 1, time.time(), MappingProxyType({})
@@ -173,7 +214,6 @@ class AdaptiveController:
             return snapshot
 
         raw: dict[str, dict[str, float]] = {}
-        now = time.monotonic()
         for backend in backends:
             observed = self.telemetry.snapshot(backend.id, backend.average_latency or 0.05)
             resource = max(
@@ -206,6 +246,9 @@ class AdaptiveController:
                 )
                 / total_weight
             )
+            if intelligence.config.enabled:
+                prediction = intelligence.predictions.get(backend_id, {})
+                score += intelligence.config.prediction_weight * prediction.get("risk", 0.0)
             if values["samples"] == 0:
                 score = max(score, 0.35)  # neutral cold-start prior
             previous = self._snapshot.policies.get(backend_id)
@@ -218,7 +261,10 @@ class AdaptiveController:
         for backend_id, score in scores.items():
             ramp = 1.0
             if self.config.slow_start_seconds > 0:
-                ramp = max(0.10, min(1.0, raw[backend_id]["age"] / self.config.slow_start_seconds))
+                age = raw[backend_id]["age"]
+                if intelligence.config.enabled:
+                    age = min(age, intelligence.predictions.get(backend_id, {}).get("recovery_age", age))
+                ramp = max(0.10, min(1.0, age / self.config.slow_start_seconds))
             quality[backend_id] = math.exp(-5.0 * score) * backend_map[backend_id].weight * ramp
 
         quality_total = sum(quality.values()) or 1.0
@@ -247,7 +293,8 @@ class AdaptiveController:
                 metrics=metric_values,
                 explanation=(
                     f"p={probability:.3f} score={scores[backend_id]:.3f}; "
-                    f"largest weighted pressure={dominant}"
+                    f"largest weighted pressure={dominant}; "
+                    f"prediction risk={intelligence.predictions.get(backend_id, {}).get('risk', 0.0):.3f}"
                 ),
             )
 

@@ -44,3 +44,10 @@ Status reflects the repository contents, not planned behavior.
 - Backend mutable state is event-loop-local, not thread-safe or multi-process safe.
 - Active health and live traffic still share some backend health counters and EWMA fields.
 - Metrics remains unauthenticated on the data-plane listener; isolate it at the network boundary.
+
+## Phase 2 implementation (runtime validation pending)
+
+- Implemented bounded congestion forecasting, predictive scoring, rolling backend/class fingerprints, class-aware eligibility, SLO feedback, objective blending, cooldown, rollback and optional contextual exploration.
+- Added authenticated intelligence/autopilot endpoints, sampled recovery ramping, retry protection after streaming starts, and retry exclusion of previously attempted backends.
+- Added focused regression tests; the GitHub connector cannot execute Python and the local environment cannot clone GitHub. No new test results or performance gains are claimed.
+- Remaining: controlled predictive/reactive comparison, sustainable capacity identification, complete client SLO accounting, forecast calibration, comprehensive recovery/learning tests and validation.

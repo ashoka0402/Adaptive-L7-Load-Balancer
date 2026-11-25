@@ -132,6 +132,7 @@ async def delete_backend(request: web.Request) -> web.Response:
     pipeline: TelemetryPipeline = request.app[TELEMETRY_KEY]
     pipeline.remove(bid)
     controller: AdaptiveController = request.app[CONTROLLER_KEY]
+    controller.intelligence.remove(bid)
     controller.publish()
     logger.info("admin: removed backend %s", bid)
     return web.json_response({"deleted": bid})
@@ -191,7 +192,37 @@ async def update_backend_telemetry(request: web.Request) -> web.Response:
     return web.json_response({"updated": backend_id})
 
 
+async def intelligence_status(request: web.Request) -> web.Response:
+    cfg: AppConfig = request.app[CONFIG_KEY]
+    if err := _auth(request, cfg.server.admin_token):
+        return err
+    controller: AdaptiveController = request.app[CONTROLLER_KEY]
+    return web.json_response(controller.intelligence_status())
+
+
+async def configure_autopilot(request: web.Request) -> web.Response:
+    cfg: AppConfig = request.app[CONFIG_KEY]
+    if err := _auth(request, cfg.server.admin_token):
+        return err
+    controller: AdaptiveController = request.app[CONTROLLER_KEY]
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("json object required")
+        enabled = body.get("enabled", controller.autopilot.enabled)
+        learning = body.get("learning", controller.autopilot.learning)
+        objective = body.get("objective", controller.autopilot.objective)
+        if not isinstance(enabled, bool) or not isinstance(learning, bool) or not isinstance(objective, str):
+            raise ValueError("invalid autopilot configuration")
+        controller.configure_autopilot(objective, enabled, learning)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "invalid autopilot configuration"}, status=400)
+    return web.json_response(controller.intelligence_status())
+
+
 def setup_admin_routes(app: web.Application) -> None:
+    app.router.add_get("/admin/intelligence", intelligence_status)
+    app.router.add_patch("/admin/autopilot", configure_autopilot)
     app.router.add_get("/admin/backends", list_backends)
     app.router.add_post("/admin/backends", add_backend)
     app.router.add_patch("/admin/backends/{id}", update_backend)

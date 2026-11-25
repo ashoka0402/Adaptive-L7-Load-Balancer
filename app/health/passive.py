@@ -50,7 +50,7 @@ class PassiveHealthMonitor:
         if (
             serious
             and backend.consecutive_failures >= self.config.failure_threshold
-            and backend.status != BackendStatus.UNHEALTHY
+            and backend.status == BackendStatus.HEALTHY
         ):
             backend.status = BackendStatus.UNHEALTHY
             logger.warning(

@@ -31,3 +31,9 @@ Roadmap order follows risk and evidence, not feature count.
 - Splitting modules into services without an independent scaling or trust-boundary requirement.
 - Machine-learning routing before deterministic feedback control is measured and understood.
 - Claiming production readiness from synthetic benchmarks alone.
+
+## Phase 2 follow-up
+
+- Execute the full suite, validate predictive versus reactive policies on identical traces and calibrate forecasts.
+- Measure service curves and account for admission rejections and disconnects in SLOs.
+- Keep online learning disabled until controlled experiments verify safety and benefit.

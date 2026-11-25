@@ -78,3 +78,7 @@ Client HTTP, admin API input, external backend telemetry, and upstream HTTP are 
 `docker-compose.yml` runs one Pulse instance, three demonstration backends, Prometheus, and Grafana. Admin and Grafana secrets must be supplied through environment variables, monitoring binds to loopback, and policy history is stored in a named SQLite volume. This is a local evaluation topology, not a highly available deployment; backend registry and live telemetry remain process-local.
 
 See `docs/adr/` for durable decisions and `IMPLEMENTATION_STATUS.md` for verified gaps.
+
+## Phase 2: predictive intelligence and Autopilot
+
+See [ADR 0003](docs/adr/0003-predictive-autopilot.md). Bounded trend forecasting, request-class fingerprints and objective-based feedback run in the adaptive controller. The selector uses class multipliers within the eligible set. Authenticated `GET /admin/intelligence` returns predictions, fingerprints, SLO observations and policy history; `PATCH /admin/autopilot` changes objective and feature flags. Demo YAML enables deterministic intelligence and Autopilot; learning remains opt-in.

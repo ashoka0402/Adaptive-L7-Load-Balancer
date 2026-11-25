@@ -34,6 +34,51 @@ class AdaptiveWeightsConfig(BaseModel):
     resources: float = Field(default=0.05, ge=0)
 
 
+class RequestClassRule(BaseModel):
+    name: str = Field(min_length=1, max_length=40, pattern=r"^[a-zA-Z0-9_-]+$")
+    path_prefix: str = Field(default="/", min_length=1, max_length=256)
+    methods: list[str] = Field(default_factory=list, max_length=16)
+    headers: dict[str, str] = Field(default_factory=dict, max_length=8)
+    backend_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
+class IntelligenceConfig(BaseModel):
+    enabled: bool = False
+    autopilot: bool = False
+    objective: Literal["balanced", "latency", "throughput", "reliability", "custom"] = "balanced"
+    learning: bool = False
+    learning_seed: int = 7
+    learning_exploration: float = Field(default=0.03, ge=0, le=0.1)
+    window_size: int = Field(default=500, ge=20, le=5000)
+    observation_seconds: float = Field(default=30, ge=1, le=300)
+    trend_points: int = Field(default=8, ge=3, le=60)
+    horizon_seconds: float = Field(default=3, gt=0, le=60)
+    congestion_threshold: float = Field(default=0.7, gt=0, lt=1)
+    prediction_weight: float = Field(default=0.35, ge=0, le=1)
+    p99_target_seconds: float = Field(default=0.1, gt=0, le=60)
+    error_target: float = Field(default=0.01, gt=0, le=1)
+    availability_target: float = Field(default=0.99, ge=0, le=1)
+    throughput_target: float = Field(default=0, ge=0, le=1000000)
+    minimum_samples: int = Field(default=20, ge=5, le=5000)
+    policy_cooldown: float = Field(default=10, ge=1, le=300)
+    weight_step: float = Field(default=0.15, gt=0, le=0.25)
+    rollback_margin: float = Field(default=0.5, gt=0, le=100)
+    rules: list[RequestClassRule] = Field(default_factory=list, max_length=16)
+
+    @model_validator(mode="after")
+    def validate_intelligence(self) -> IntelligenceConfig:
+        if self.learning and not self.autopilot:
+            raise ValueError("learning requires autopilot")
+        if self.autopilot and not self.enabled:
+            raise ValueError("autopilot requires intelligence")
+        if self.minimum_samples > self.window_size:
+            raise ValueError("minimum_samples exceeds window_size")
+        names = [rule.name for rule in self.rules]
+        if len(set(names)) != len(names) or "default" in names:
+            raise ValueError("request class names must be unique and not reserved")
+        return self
+
+
 class AdaptiveConfig(BaseModel):
     interval: float = Field(default=1.0, gt=0)
     window_size: int = Field(default=100, ge=10)
@@ -43,6 +88,7 @@ class AdaptiveConfig(BaseModel):
     smoothing: float = Field(default=0.30, gt=0, le=1)
     max_probability_step: float = Field(default=0.15, gt=0, le=1)
     weights: AdaptiveWeightsConfig = Field(default_factory=AdaptiveWeightsConfig)
+    intelligence: IntelligenceConfig = Field(default_factory=IntelligenceConfig)
 
     @model_validator(mode="after")
     def ensure_weight(self) -> AdaptiveConfig:
