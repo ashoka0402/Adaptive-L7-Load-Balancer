@@ -11,7 +11,7 @@ from aiohttp import web
 from pydantic import ValidationError
 
 from app.app_keys import CONFIG_KEY
-from app.experiments.manager import ExperimentManager, TERMINAL
+from app.experiments.manager import TERMINAL, ExperimentManager
 from app.experiments.spec import ExperimentSpec
 
 EXPERIMENTS_KEY = web.AppKey("experiments",ExperimentManager)
@@ -65,9 +65,20 @@ async def result(request: web.Request) -> web.Response:
 async def control(request: web.Request) -> web.Response:
     authorize(request)
     manager=request.app[EXPERIMENTS_KEY]
-    job=get_job(request)
+    action=request.match_info["action"]
+    job=manager.jobs.get(request.match_info["id"])
+    if job is None:
+        if action not in {"replay","reset"} or manager.store is None:
+            raise web.HTTPNotFound()
+        saved=await asyncio.to_thread(manager.store.get_experiment,request.match_info["id"])
+        if saved is None:
+            raise web.HTTPNotFound()
+        try:
+            new=manager.start(ExperimentSpec.model_validate(saved["spec"]))
+        except RuntimeError as exc:
+            return web.json_response({"error":str(exc)},status=409)
+        return web.json_response(new.info(),status=202)
     try:
-        action=request.match_info["action"]
         if action=="pause":
             manager.pause(job)
         elif action=="resume":
@@ -87,13 +98,19 @@ async def control(request: web.Request) -> web.Response:
 
 async def export(request: web.Request) -> web.Response:
     authorize(request)
-    job=get_job(request)
+    manager=request.app[EXPERIMENTS_KEY]
+    job=manager.jobs.get(request.match_info["id"])
+    payload=job.info(full=True) if job else None
+    if payload is None and manager.store:
+        payload=await asyncio.to_thread(manager.store.get_experiment,request.match_info["id"])
+    if payload is None:
+        raise web.HTTPNotFound()
     if request.query.get("format")!="csv":
-        return web.json_response(job.info(full=True))
+        return web.json_response(payload)
     buffer=io.StringIO()
     writer=csv.DictWriter(buffer,fieldnames=["algorithm","seed","id","arrival","completed","class","backend","status","latency_ms"])
     writer.writeheader()
-    for run in job.runs:
+    for run in payload["runs"]:
         for row in run["requests"]:
             writer.writerow({"algorithm":run["algorithm"],"seed":run["seed"],**row})
     return web.Response(text=buffer.getvalue(),content_type="text/csv")

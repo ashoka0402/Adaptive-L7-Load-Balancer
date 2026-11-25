@@ -4,7 +4,7 @@ import time
 import pytest
 
 from app.config import AdaptiveConfig, IntelligenceConfig, RequestClassRule
-from app.control.autopilot import Autopilot, KEYS
+from app.control.autopilot import KEYS, Autopilot
 from app.control.controller import AdaptiveController
 from app.control.intelligence import Intelligence
 from app.models.backend import Backend, BackendRegistry

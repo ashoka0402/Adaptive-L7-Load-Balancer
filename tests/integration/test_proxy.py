@@ -16,8 +16,8 @@ from app.config import (
     PersistenceConfig,
     ServerConfig,
 )
-from app.server import LoadBalancerApp
 from app.models.backend import CircuitState
+from app.server import LoadBalancerApp
 
 
 @asynccontextmanager

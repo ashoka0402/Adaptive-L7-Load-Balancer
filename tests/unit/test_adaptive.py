@@ -78,7 +78,7 @@ def test_telemetry_window_and_external_values_are_bounded() -> None:
 
 
 def test_final_probabilities_respect_floor_and_movement_bound() -> None:
-    registry, telemetry, controller = _controller()
+    _registry, telemetry, controller = _controller()
     first = controller.publish()
     for _ in range(20):
         telemetry.record("healthy", 0.001, True)

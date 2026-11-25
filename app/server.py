@@ -12,9 +12,9 @@ from app.admin.routes import setup_admin_routes
 from app.app_keys import CONFIG_KEY, CONTROLLER_KEY, REGISTRY_KEY, TELEMETRY_KEY
 from app.config import AppConfig
 from app.control.controller import AdaptiveController
-from app.health.active import ActiveHealthChecker
 from app.experiments.manager import ExperimentManager
 from app.experiments.routes import setup_experiment_routes
+from app.health.active import ActiveHealthChecker
 from app.health.passive import PassiveHealthMonitor
 from app.metrics import prometheus as metrics
 from app.models.backend import Backend, BackendRegistry

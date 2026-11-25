@@ -10,7 +10,7 @@ async def test_http_lab_uses_actual_local_proxy():
     frames=[]
     async def progress(frame):
         frames.append(frame)
-    spec=ExperimentSpec(mode="http",algorithms=["round_robin"],rps=10,duration=.4,
+    spec=ExperimentSpec(mode="http",algorithms=["round_robin"],rps=10,duration=.4,concurrency=8,
                         nodes=[NodeSpec(id="one",latency_ms=5,capacity=8)])
     result=await run_http(spec,"round_robin",7,progress)
     assert result["mode"]=="http"

@@ -208,12 +208,12 @@ async def configure_autopilot(request: web.Request) -> web.Response:
     try:
         body = await request.json()
         if not isinstance(body, dict):
-            raise ValueError("json object required")
+            raise TypeError("json object required")
         enabled = body.get("enabled", controller.autopilot.enabled)
         learning = body.get("learning", controller.autopilot.learning)
         objective = body.get("objective", controller.autopilot.objective)
         if not isinstance(enabled, bool) or not isinstance(learning, bool) or not isinstance(objective, str):
-            raise ValueError("invalid autopilot configuration")
+            raise TypeError("invalid autopilot configuration")
         controller.configure_autopilot(objective, enabled, learning)
     except (TypeError, ValueError):
         return web.json_response({"error": "invalid autopilot configuration"}, status=400)

@@ -2,15 +2,22 @@
 from __future__ import annotations
 
 import asyncio
-import random
+import secrets
 import time
 from contextlib import AsyncExitStack
 
 import aiohttp
 from aiohttp import web
 
-from app.config import (AppConfig, BackendConfig, BackpressureConfig, HealthCheckConfig,
-                        LoadBalancingConfig, PersistenceConfig, ServerConfig)
+from app.config import (
+    AppConfig,
+    BackendConfig,
+    BackpressureConfig,
+    HealthCheckConfig,
+    LoadBalancingConfig,
+    PersistenceConfig,
+    ServerConfig,
+)
 from app.experiments.lab import ADAPTIVE, Node, Progress, adaptive_config, service, summarize
 from app.experiments.spec import ExperimentSpec, trace
 from app.models.backend import Backend
@@ -61,7 +68,7 @@ async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
             configs.append(BackendConfig(id=n.id, host="127.0.0.1", port=port,
                                          capacity=n.capacity, weight=n.weight))
         config = AppConfig(
-            server=ServerConfig(host="127.0.0.1", port=0, admin_token=random.Random(seed).randbytes(24).hex()),
+            server=ServerConfig(host="127.0.0.1", port=0, admin_token=secrets.token_hex(24)),
             backends=configs, persistence=PersistenceConfig(enabled=False),
             load_balancing=LoadBalancingConfig(strategy="adaptive" if algorithm in ADAPTIVE else algorithm),
             adaptive=adaptive_config(algorithm,seed,spec),

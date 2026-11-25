@@ -1,8 +1,8 @@
 """Deterministic SLO feedback and opt-in bounded contextual exploration."""
 from __future__ import annotations
 
-from collections import deque
 import random
+from collections import deque
 
 from app.config import IntelligenceConfig
 

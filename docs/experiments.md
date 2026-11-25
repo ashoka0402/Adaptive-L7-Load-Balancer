@@ -24,8 +24,8 @@ routing outcomes; no sensitive traffic payloads are collected.
 
 Shadow selection is sampled only within simulations. It uses observed primary-state
 candidates, estimates queue delay and configured error-rate deltas, and never sends
-duplicate requests. Adaptive shadow policies currently share the primary controller
-snapshot, so they are not independent adaptive counterfactual controllers.
+duplicate requests. Adaptive shadow policies have separate controller snapshots but observe the primary
+policy's state and outcomes; this is not an independent counterfactual trajectory.
 
 Arena uses repeated identical seeded traces and separate runtime state. Reports
 include success rate, offered/successful RPS, latency percentiles, drops, timeouts,

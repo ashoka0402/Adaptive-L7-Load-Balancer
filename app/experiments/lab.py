@@ -9,7 +9,7 @@ import random
 import statistics
 from collections import Counter, deque
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 from app.config import AdaptiveConfig, IntelligenceConfig, RequestClassRule
 from app.control.controller import AdaptiveController
@@ -118,7 +118,9 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
     telemetry = TelemetryPipeline()
     controller = AdaptiveController(registry, telemetry, adaptive_config(algorithm, seed, spec))
     router = strategy(algorithm, controller, seed)
-    shadows = {name: strategy(name, controller, seed+1) for name in spec.shadow}
+    shadow_controllers = {name: AdaptiveController(registry, telemetry, adaptive_config(name,seed,spec))
+                          for name in spec.shadow if name in ADAPTIVE}
+    shadows = {name: strategy(name, shadow_controllers.get(name,controller), seed+1) for name in spec.shadow}
     shadow_stats: dict[str, dict] = {name: {"samples": 0, "disagreements": 0,
                                           "estimated_latency_delta_ms_sum": 0.0,
                                           "estimated_error_delta_sum": 0.0}
@@ -134,6 +136,7 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
     policy_changes = 0
     last_weights: dict = {}
     peak_queue = 0
+    successes = 0
 
     def event(t: float, priority: int, kind: str, payload: object) -> None:
         nonlocal sequence
@@ -148,19 +151,24 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
         event(tick*.1, 2, "tick", None)
 
     def finish(rid: int, arrival: float, cls: str, bid: str | None, status: str) -> None:
-        nonlocal total_active
+        nonlocal total_active, successes
         if rid in completed_ids:
             return
         completed_ids.add(rid)
+        successes += int(status == "ok")
         elapsed = max(0.0, current-arrival)
         rows.append({"id": rid, "arrival": arrival, "completed": current, "class": cls,
                      "backend": bid, "status": status, "latency_ms": elapsed*1000})
         controller.intelligence.observe_client(elapsed, status == "ok", now=current)
+        for other in shadow_controllers.values():
+            other.intelligence.observe_client(elapsed,status == "ok",now=current)
         if bid is not None:
             node = nodes[bid]
             telemetry.record(bid, elapsed, status == "ok")
             controller.intelligence.observe(bid, cls, elapsed, status == "ok",
                                             node.backend.active_connections, now=current)
+            for other in shadow_controllers.values():
+                other.intelligence.observe(bid,cls,elapsed,status == "ok",node.backend.active_connections,now=current)
             if status == "ok":
                 node.backend.record_success(elapsed)
             else:
@@ -176,8 +184,10 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
             node.active[rid] = (arrival, cls, ok)
             event(current+duration, 1, "complete", (node.spec.id, rid))
 
+    processed = 0
     while events:
         current, _, _, kind, payload = heapq.heappop(events)
+        processed += 1
         if kind == "fault":
             assert isinstance(payload, Fault)
             node = nodes[payload.backend]
@@ -240,6 +250,8 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
                                       cpu=min(1,len(node.active)/node.capacity), now=current)
         if kind == "tick":
             snapshot = controller.publish(now=current)
+            for other in shadow_controllers.values():
+                other.publish(now=current)
             weights = controller.intelligence_status()["weights"]
             if weights != last_weights:
                 policy_changes += 1
@@ -250,11 +262,11 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
                                          "capacity": n.capacity, "down": n.down,
                                          "probability": snapshot.policies[bid].probability if bid in snapshot.policies else 0}
                                    for bid,n in nodes.items()},
-                         "successes": sum(r["status"] == "ok" for r in rows),
+                         "successes": successes,
                          "policy_version": snapshot.version}
                 timeline.append(frame)
                 await progress(frame)
-        if sequence % 256 == 0:
+        if processed % 256 == 0:
             await asyncio.sleep(0)
         if len(completed_ids) == len(arrivals) and current >= spec.duration+spec.warmup:
             break
