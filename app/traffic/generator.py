@@ -89,7 +89,7 @@ class AsyncTrafficGenerator:
                 started = time.perf_counter()
                 status = 0
                 try:
-                    async with session.get(url) as response:
+                    async with session.get(url, allow_redirects=False) as response:
                         await response.read()
                         status = response.status
                 except (aiohttp.ClientError, TimeoutError, OSError):

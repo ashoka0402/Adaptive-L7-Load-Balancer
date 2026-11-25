@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from collections import deque
 
-from app.control.intelligence import percentile
+from math import ceil
 
 
 class ConsoleTelemetry:
@@ -31,7 +31,7 @@ class ConsoleTelemetry:
         current = time.monotonic() if now is None else now
         samples = [x for x in self.samples if current - 30 <= x[0] <= current]
         recent = [x for x in samples if x[0] > current - 1]
-        latencies = [x[1] for x in samples]
+        latencies = sorted(x[1] for x in samples)
         count = len(samples)
         return {
             "total": self.total, "errors": self.errors, "sample_count": count,
@@ -39,7 +39,7 @@ class ConsoleTelemetry:
             "recent_completed_rps_lower_bound": len(recent),
             "recent_success_rps_lower_bound": sum(x[2] for x in recent),
             "error_rate": sum(not x[2] for x in samples) / count if count else None,
-            **{f"p{p}_ms": percentile(latencies, p/100)*1000 if count else None
+            **{f"p{p}_ms": latencies[max(0, ceil(p/100*count)-1)]*1000 if count else None
                for p in (50, 95, 99)},
             "decisions": list(reversed(self.decisions)),
         }

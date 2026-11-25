@@ -6,8 +6,8 @@ import json
 import sqlite3
 import time
 import uuid
-from contextlib import contextmanager
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 

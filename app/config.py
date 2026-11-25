@@ -141,7 +141,14 @@ class HealthCheckConfig(ConfigModel):
     timeout: float = Field(default=2.0, gt=0, le=60)
     failure_threshold: int = Field(default=3, ge=1, le=1000)
     recovery_threshold: int = Field(default=2, ge=1, le=1000)
-    path: str = Field(default="/health", pattern=r"^/(?!/)[^\s?#]*$")
+    path: str = "/health"
+
+    @field_validator("path")
+    @classmethod
+    def valid_path(cls, value: str) -> str:
+        if not re.fullmatch(r"/(?!/)[^\s?#]*", value):
+            raise ValueError("health path must be an absolute path without query or fragment")
+        return value
 
 
 class CircuitBreakerConfig(ConfigModel):

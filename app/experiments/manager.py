@@ -64,13 +64,13 @@ class ExperimentManager:
                         await asyncio.sleep(0)
                     runner = simulate if job.spec.mode == "simulation" else run_http
                     job.runs.append(await runner(job.spec,algorithm,job.spec.seed+i,progress))
-            job.state = "completed"
             if self.store:
                 try:
-                    await asyncio.to_thread(self.store.save_experiment,job.id,job.info(full=True))
+                    await asyncio.to_thread(self.store.save_experiment,job.id,{**job.info(full=True),"state":"completed"})
                 except Exception:
                     logger.exception("experiment persistence failed")
                     job.error = "result available in memory; persistence failed"
+            job.state = "completed"
         except asyncio.CancelledError:
             job.state = "cancelled"
         except Exception:

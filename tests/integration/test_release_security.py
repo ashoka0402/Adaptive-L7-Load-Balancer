@@ -49,18 +49,23 @@ async def test_forwarding_preserves_gzip_and_does_not_share_cookies_or_admin_tok
     port = runner.addresses[0][1]
     pulse = LoadBalancerApp(AppConfig(
         server=ServerConfig(host="127.0.0.1", port=0, admin_token="integration-secret-token"),
-        backends=[BackendConfig(id="b", host="127.0.0.1", port=port)],
+        backends=[BackendConfig(id="b", host="localhost", port=port)],
         health_check=HealthCheckConfig(interval=60), persistence=PersistenceConfig(enabled=False),
     ))
     try:
         await pulse.start()
         url = f"http://127.0.0.1:{pulse.runner.addresses[0][1]}"
-        async with aiohttp.ClientSession(auto_decompress=False) as session:
-            async with session.get(url+"/a", headers=AUTH) as response:
-                assert response.headers["Content-Encoding"] == "gzip"
-                assert await response.read() == payload
-            async with session.get(url+"/b") as response:
-                assert await response.read() == payload
+        async with (
+            aiohttp.ClientSession(auto_decompress=False) as session,
+            session.get(url+"/a", headers=AUTH) as response,
+        ):
+            assert response.headers["Content-Encoding"] == "gzip"
+            assert await response.read() == payload
+        async with (
+            aiohttp.ClientSession(auto_decompress=False) as second,
+            second.get(url+"/b") as response,
+        ):
+            assert await response.read() == payload
         assert len(seen) == 2
         assert not any(key.lower()=="authorization" for key in seen[0])
         assert not any(key.lower()=="cookie" for key in seen[1])

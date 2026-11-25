@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
-from collections import defaultdict, deque
+from collections import defaultdict
 
 import aiohttp
 
@@ -14,23 +13,12 @@ from app.config import ConnectionPoolConfig, TimeoutsConfig
 logger = logging.getLogger(__name__)
 
 
-class PooledConnection:
-    """Thin wrapper around an aiohttp connector-backed session usage."""
-
-    def __init__(self, session: aiohttp.ClientSession, backend_id: str) -> None:
-        self.session = session
-        self.backend_id = backend_id
-        self.created_at = time.monotonic()
-        self.last_used = time.monotonic()
-        self.in_use = False
-
-
 class ConnectionPool:
     """
     Connection reuse per backend.
 
     Uses a shared aiohttp.ClientSession with TCPConnector limits.
-    Tracks idle connections and enforces max per backend.
+    The connector owns idle reuse and enforces total and per-host connection limits.
     """
 
     def __init__(
@@ -42,10 +30,8 @@ class ConnectionPool:
         self.timeouts = timeouts
         self._connector: aiohttp.TCPConnector | None = None
         self._session: aiohttp.ClientSession | None = None
-        self._idle: dict[str, deque[PooledConnection]] = defaultdict(deque)
         self._active_count: dict[str, int] = defaultdict(int)
         self._lock = asyncio.Lock()
-        self._cleanup_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         self._connector = aiohttp.TCPConnector(
@@ -68,15 +54,8 @@ class ConnectionPool:
             auto_decompress=False,  # preserve Content-Encoding and bytes verbatim
             cookie_jar=aiohttp.DummyCookieJar(),  # never share upstream cookies across clients
         )
-        self._cleanup_task = asyncio.create_task(self._idle_cleanup())
 
     async def stop(self) -> None:
-        if self._cleanup_task:
-            self._cleanup_task.cancel()
-            try:
-                await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
         if self._session and not self._session.closed:
             await self._session.close()
         if self._connector:
@@ -91,9 +70,6 @@ class ConnectionPool:
     async def acquire(self, backend_id: str) -> aiohttp.ClientSession:
         """Return the shared session; track active count for metrics."""
         async with self._lock:
-            if self._active_count[backend_id] >= self.pool_config.max_connections_per_backend:
-                # Still allow; connector will queue / reject. Caller may want to shed.
-                pass
             self._active_count[backend_id] += 1
         return self.session
 
@@ -107,9 +83,3 @@ class ConnectionPool:
 
     def active_connections(self, backend_id: str) -> int:
         return self._active_count.get(backend_id, 0)
-
-    async def _idle_cleanup(self) -> None:
-        while True:
-            await asyncio.sleep(self.pool_config.idle_timeout / 2)
-            # aiohttp connector handles most idle cleanup via keepalive_timeout
-            # This loop is a placeholder for future explicit idle tracking.
