@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from app.config import AdaptiveConfig
+from app.config import AdaptiveConfig, IntelligenceConfig
 from app.control.autopilot import Autopilot
 from app.control.intelligence import Intelligence
 from app.models.backend import BackendRegistry
@@ -184,7 +184,29 @@ class AdaptiveController:
                     "availability": self.intelligence.config.availability_target,
                     "success_rps": self.intelligence.config.throughput_target,
                 },
+                "safety": {"learning_exploration": self.intelligence.config.learning_exploration,
+                           "policy_cooldown": self.intelligence.config.policy_cooldown,
+                           "weight_step": self.intelligence.config.weight_step,
+                           "rollback_margin": self.intelligence.config.rollback_margin},
                 "slo": self.intelligence.slo(time.monotonic())}
+
+    def configure_targets(self, values: dict[str, float]) -> None:
+        allowed = {"p99_target_seconds", "error_target", "availability_target", "throughput_target",
+                   "learning_exploration", "policy_cooldown", "weight_step", "rollback_margin"}
+        if not values or set(values) - allowed:
+            raise ValueError("unknown or empty target fields")
+        if any(not math.isfinite(value) for value in values.values()):
+            raise ValueError("targets must be finite")
+        data = self.intelligence.config.model_dump()
+        data.update(values)
+        data.update(objective=self.autopilot.objective, autopilot=self.autopilot.enabled,
+                    learning=self.autopilot.learning)
+        updated = IntelligenceConfig.model_validate(data)
+        self.intelligence.config = updated
+        self.autopilot.config = updated
+        self.config.intelligence = updated
+        self.autopilot.configure(self.autopilot.objective, self.autopilot.enabled, self.autopilot.learning)
+        self.publish()
 
     def configure_autopilot(self, objective: str, enabled: bool, learning: bool) -> None:
         if not self.intelligence.config.enabled:

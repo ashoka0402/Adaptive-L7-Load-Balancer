@@ -13,6 +13,7 @@ class ConsoleTelemetry:
         self.decisions: deque[dict] = deque(maxlen=80)
         self.total = 0
         self.errors = 0
+        self.selections = 0
 
     def record(self, elapsed: float, success: bool, *, now: float | None = None) -> None:
         self.total += 1
@@ -21,7 +22,8 @@ class ConsoleTelemetry:
 
     def decision(self, backend_id: str, reason: str, request_class: str) -> None:
         # Sampled selection events are metadata only; no URLs, headers or request IDs.
-        if self.total % 10 == 0:
+        self.selections += 1
+        if self.selections % 10 == 1:
             self.decisions.append({"at": time.time(), "backend": backend_id,
                                    "reason": reason, "class": request_class})
 

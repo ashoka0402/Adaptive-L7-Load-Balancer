@@ -41,3 +41,21 @@ async def test_console_error_rate_counts_actual_failure():
             data = await response.json()
             assert data["metrics"]["total"] == 1
             assert data["metrics"]["error_rate"] == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_slo_settings_are_authenticated_validated_and_atomic():
+    headers = {"Authorization": "Bearer integration-secret-token"}
+    async with running_stack() as (pulse, _state, url), aiohttp.ClientSession() as session:
+        endpoint = f"{url}/admin/autopilot/targets"
+        async with session.patch(endpoint, json={"p99_target_seconds": .2}) as response:
+            assert response.status == 401
+        async with session.patch(endpoint, headers=headers, json={"p99_target_seconds": .2}) as response:
+            assert response.status == 200
+            assert (await response.json())["targets"]["p99_seconds"] == .2
+        assert pulse.controller.autopilot.config.p99_target_seconds == .2
+        assert pulse.controller.intelligence.config.p99_target_seconds == .2
+        async with session.patch(endpoint, headers=headers,
+                                 json={"p99_target_seconds": .3, "learning_exploration": .9}) as response:
+            assert response.status == 400
+        assert pulse.controller.intelligence.config.p99_target_seconds == .2

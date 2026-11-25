@@ -220,9 +220,27 @@ async def configure_autopilot(request: web.Request) -> web.Response:
     return web.json_response(controller.intelligence_status())
 
 
+async def configure_targets(request: web.Request) -> web.Response:
+    cfg: AppConfig = request.app[CONFIG_KEY]
+    if err := _auth(request, cfg.server.admin_token):
+        return err
+    controller: AdaptiveController = request.app[CONTROLLER_KEY]
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise TypeError("json object required")
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in body.values()):
+            raise TypeError("numeric target fields required")
+        controller.configure_targets({key: float(value) for key, value in body.items()})
+    except (TypeError, ValueError):
+        return web.json_response({"error": "invalid SLO or safety target"}, status=400)
+    return web.json_response(controller.intelligence_status())
+
+
 def setup_admin_routes(app: web.Application) -> None:
     app.router.add_get("/admin/intelligence", intelligence_status)
     app.router.add_patch("/admin/autopilot", configure_autopilot)
+    app.router.add_patch("/admin/autopilot/targets", configure_targets)
     app.router.add_get("/admin/backends", list_backends)
     app.router.add_post("/admin/backends", add_backend)
     app.router.add_patch("/admin/backends/{id}", update_backend)

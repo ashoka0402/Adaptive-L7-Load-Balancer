@@ -27,10 +27,12 @@ async def test_console_end_to_end():
             await expect(page.get_by_text("Engine connected", exact=True)).to_be_visible()
             await page.get_by_role("link", name="Overview", exact=True).click()
             await expect(page.get_by_role("heading", name="Traffic command center")).to_be_visible()
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url + "/demo") as response:
-                    assert response.status == 200
-                    await response.read()
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(url + "/demo") as response,
+            ):
+                assert response.status == 200
+                await response.read()
             assert state["requests"] == 1
             await expect(page.locator("#live-nodes")).to_contain_text("backend")
             await page.screenshot(path=reports / "pulse-overview.png", full_page=True)

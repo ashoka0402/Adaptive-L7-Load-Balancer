@@ -68,4 +68,6 @@ Phase 3 follow-up: added opt-in sampled live baseline shadow decisions and a ded
 - Added responsive product landing and operating console: live topology, charts, Traffic Lab, Arena, Chaos, replay, Autopilot, backend intelligence, observability and configuration. UI reads real APIs and labels simulated versus measured data; token is memory-only.
 - Added bounded instance-local client telemetry and sampled routing explanations; simulation frames expose routing counts and policy metadata. HTTP frames expose completion counts.
 - Added authenticated console integration tests, JavaScript model tests, real Chromium UI tests, and screenshot artifacts in CI. The prior Phase 3 commit's workflow completed successfully; verify the Phase 4 workflow separately.
-- Remaining: runtime SLO editing beyond experiment specifications, full browser/visual validation, production deployment hardening and the Phase 3 limitations documented above.
+- Remaining: full browser/visual validation, production deployment hardening and the Phase 3 limitations documented above.
+
+Phase 4 follow-up: authenticated runtime SLO/safety target editing with atomic validation; corrected decision sampling to count selections rather than completed requests. CI lint finding in browser test fixed without changing test expectations.
