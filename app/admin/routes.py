@@ -4,20 +4,18 @@ from __future__ import annotations
 
 import hmac
 import logging
-import math
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from aiohttp import web
 
-from app.app_keys import CONFIG_KEY, CONTROLLER_KEY, REGISTRY_KEY, TELEMETRY_KEY
+from app.app_keys import CONFIG_KEY, REGISTRY_KEY
 from app.config import BackendConfig
 from app.models.backend import Backend, BackendStatus
 
 if TYPE_CHECKING:
     from app.config import AppConfig
-    from app.control.controller import AdaptiveController
     from app.models.backend import BackendRegistry
-    from app.telemetry.pipeline import TelemetryPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +75,6 @@ async def add_backend(request: web.Request) -> web.Response:
         return web.json_response({"error": "destination not in deployment allowlist"}, status=403)
     backend = Backend(**validated.model_dump())
     registry.add(backend)
-    controller: AdaptiveController = request.app[CONTROLLER_KEY]
-    controller.publish()
     logger.info("admin: added backend %s", bid)
     return web.json_response(backend.to_dict(), status=201)
 
@@ -122,8 +118,6 @@ async def update_backend(request: web.Request) -> web.Response:
     if status == "HEALTHY" and backend.status == BackendStatus.DRAINING:
         backend.status = BackendStatus.HEALTHY
 
-    controller: AdaptiveController = request.app[CONTROLLER_KEY]
-    controller.publish()
     return web.json_response(backend.to_dict())
 
 
@@ -136,122 +130,26 @@ async def delete_backend(request: web.Request) -> web.Response:
     removed = registry.remove(bid)
     if not removed:
         return web.json_response({"error": "not found"}, status=404)
-    pipeline: TelemetryPipeline = request.app[TELEMETRY_KEY]
-    pipeline.remove(bid)
-    controller: AdaptiveController = request.app[CONTROLLER_KEY]
-    controller.intelligence.remove(bid)
-    controller.publish()
     logger.info("admin: removed backend %s", bid)
     return web.json_response({"deleted": bid})
 
 
-async def routing_policy(request: web.Request) -> web.Response:
-    cfg: AppConfig = request.app[CONFIG_KEY]
-    if err := _auth(request, cfg.server.admin_token):
-        return err
-    controller: AdaptiveController = request.app[CONTROLLER_KEY]
-    return web.json_response(controller.snapshot.to_dict())
+def setup_admin_routes(app: web.Application, switch_strategy: Callable[[str], None]) -> None:
+    async def update_strategy(request: web.Request) -> web.Response:
+        cfg = request.app[CONFIG_KEY]
+        if err := _auth(request, cfg.server.admin_token):
+            return err
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or not isinstance(body.get("strategy"), str):
+                raise ValueError("strategy required")
+            switch_strategy(body["strategy"])
+        except (TypeError, ValueError):
+            return web.json_response({"error": "unknown routing strategy"}, status=400)
+        return web.json_response({"strategy": cfg.load_balancing.strategy})
 
-
-async def update_routing_weights(request: web.Request) -> web.Response:
-    cfg: AppConfig = request.app[CONFIG_KEY]
-    if err := _auth(request, cfg.server.admin_token):
-        return err
-    controller: AdaptiveController = request.app[CONTROLLER_KEY]
-    try:
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise TypeError("json object required")
-        weights = {key: float(value) for key, value in body.items()}
-        controller.update_weights(weights)
-    except (TypeError, ValueError, OverflowError) as exc:
-        return web.json_response({"error": str(exc)}, status=400)
-    return web.json_response(controller.snapshot.to_dict())
-
-
-async def update_backend_telemetry(request: web.Request) -> web.Response:
-    cfg: AppConfig = request.app[CONFIG_KEY]
-    if err := _auth(request, cfg.server.admin_token):
-        return err
-    registry: BackendRegistry = request.app[REGISTRY_KEY]
-    backend_id = request.match_info["id"]
-    if not registry.get(backend_id):
-        return web.json_response({"error": "not found"}, status=404)
-    pipeline: TelemetryPipeline = request.app[TELEMETRY_KEY]
-    try:
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise TypeError("json object required")
-        for key in ("cpu", "memory"):
-            if key in body and not math.isfinite(float(body[key])):
-                raise ValueError("telemetry values must be finite")
-        queue_depth = int(body["queue_depth"]) if "queue_depth" in body else None
-        if queue_depth is not None and not 0 <= queue_depth <= 1000000:
-            raise ValueError("queue_depth out of range")
-        pipeline.update_external(
-            backend_id,
-            queue_depth=queue_depth,
-            cpu=float(body["cpu"]) if "cpu" in body else None,
-            memory=float(body["memory"]) if "memory" in body else None,
-        )
-    except (TypeError, ValueError, OverflowError):
-        return web.json_response({"error": "invalid telemetry"}, status=400)
-    return web.json_response({"updated": backend_id})
-
-
-async def intelligence_status(request: web.Request) -> web.Response:
-    cfg: AppConfig = request.app[CONFIG_KEY]
-    if err := _auth(request, cfg.server.admin_token):
-        return err
-    controller: AdaptiveController = request.app[CONTROLLER_KEY]
-    return web.json_response(controller.intelligence_status())
-
-
-async def configure_autopilot(request: web.Request) -> web.Response:
-    cfg: AppConfig = request.app[CONFIG_KEY]
-    if err := _auth(request, cfg.server.admin_token):
-        return err
-    controller: AdaptiveController = request.app[CONTROLLER_KEY]
-    try:
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise TypeError("json object required")
-        enabled = body.get("enabled", controller.autopilot.enabled)
-        learning = body.get("learning", controller.autopilot.learning)
-        objective = body.get("objective", controller.autopilot.objective)
-        if not isinstance(enabled, bool) or not isinstance(learning, bool) or not isinstance(objective, str):
-            raise TypeError("invalid autopilot configuration")
-        controller.configure_autopilot(objective, enabled, learning)
-    except (TypeError, ValueError, OverflowError):
-        return web.json_response({"error": "invalid autopilot configuration"}, status=400)
-    return web.json_response(controller.intelligence_status())
-
-
-async def configure_targets(request: web.Request) -> web.Response:
-    cfg: AppConfig = request.app[CONFIG_KEY]
-    if err := _auth(request, cfg.server.admin_token):
-        return err
-    controller: AdaptiveController = request.app[CONTROLLER_KEY]
-    try:
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise TypeError("json object required")
-        if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in body.values()):
-            raise TypeError("numeric target fields required")
-        controller.configure_targets({key: float(value) for key, value in body.items()})
-    except (TypeError, ValueError, OverflowError):
-        return web.json_response({"error": "invalid SLO or safety target"}, status=400)
-    return web.json_response(controller.intelligence_status())
-
-
-def setup_admin_routes(app: web.Application) -> None:
-    app.router.add_get("/admin/intelligence", intelligence_status)
-    app.router.add_patch("/admin/autopilot", configure_autopilot)
-    app.router.add_patch("/admin/autopilot/targets", configure_targets)
+    app.router.add_patch("/admin/strategy", update_strategy)
     app.router.add_get("/admin/backends", list_backends)
     app.router.add_post("/admin/backends", add_backend)
     app.router.add_patch("/admin/backends/{id}", update_backend)
     app.router.add_delete("/admin/backends/{id}", delete_backend)
-    app.router.add_put("/admin/backends/{id}/telemetry", update_backend_telemetry)
-    app.router.add_get("/admin/routing/policy", routing_policy)
-    app.router.add_patch("/admin/routing/weights", update_routing_weights)

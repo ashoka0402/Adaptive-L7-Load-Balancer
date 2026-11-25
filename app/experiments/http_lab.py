@@ -18,7 +18,7 @@ from app.config import (
     PersistenceConfig,
     ServerConfig,
 )
-from app.experiments.lab import ADAPTIVE, Node, Progress, adaptive_config, service, summarize
+from app.experiments.lab import Node, Progress, service, summarize
 from app.experiments.spec import ExperimentSpec, trace
 from app.models.backend import Backend
 
@@ -77,8 +77,7 @@ async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
         config = AppConfig(
             server=ServerConfig(host="127.0.0.1", port=0, admin_token=secrets.token_hex(24)),
             backends=configs, persistence=PersistenceConfig(enabled=False),
-            load_balancing=LoadBalancingConfig.model_validate({"strategy":"adaptive" if algorithm in ADAPTIVE else algorithm}),
-            adaptive=adaptive_config(algorithm,seed,spec),
+            load_balancing=LoadBalancingConfig.model_validate({"strategy":algorithm}),
             health_check=HealthCheckConfig(interval=.2, timeout=.5, failure_threshold=1),
             backpressure=BackpressureConfig(max_concurrent_requests=spec.concurrency, max_queue_size=spec.concurrency),
         )
@@ -148,5 +147,5 @@ async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
     summary = summarize(rows,spec,elapsed)
     summary["process_cpu_seconds"] = time.process_time()-cpu_started
     return {"algorithm":algorithm,"seed":seed,"mode":"http","summary":summary,
-            "timeline":timeline,"requests":rows,"shadow":{},
+            "timeline":timeline,"requests":rows,
             "note":"Measured local HTTP; synthetic application faults; no external targets. CPU includes whole process, setup and teardown."}

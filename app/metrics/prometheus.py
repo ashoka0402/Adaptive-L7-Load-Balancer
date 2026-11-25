@@ -13,7 +13,6 @@ from prometheus_client import (
 )
 
 if TYPE_CHECKING:
-    from app.control.controller import RoutingPolicySnapshot
     from app.models.backend import BackendRegistry
 
 # Traffic
@@ -73,17 +72,6 @@ FAILED_REQUESTS = Counter("lb_failed_requests_total", "Failed requests")
 # Load shedding
 REJECTED = Counter("lb_rejected_requests_total", "Requests rejected by backpressure")
 QUEUE_SIZE = Gauge("lb_queue_size", "Current backpressure queue size")
-ROUTING_PROBABILITY = Gauge(
-    "pulse_backend_routing_probability", "Published adaptive routing probability", ["backend"]
-)
-ROUTING_SCORE = Gauge(
-    "pulse_backend_routing_score", "Published adaptive routing score", ["backend"]
-)
-ESTIMATED_CAPACITY = Gauge(
-    "pulse_backend_estimated_capacity", "Controller-estimated backend capacity", ["backend"]
-)
-
-
 def metrics_response() -> tuple[bytes, str]:
     return generate_latest(), CONTENT_TYPE_LATEST
 
@@ -103,10 +91,3 @@ def update_backend_gauges(registry: BackendRegistry) -> None:
             "HALF_OPEN": 0.5,
         }.get(b.circuit_state.value, 0.0)
         BACKEND_CIRCUIT.labels(backend=b.id).set(circuit_val)
-
-
-def update_adaptive_gauges(snapshot: RoutingPolicySnapshot) -> None:
-    for backend_id, policy in snapshot.policies.items():
-        ROUTING_PROBABILITY.labels(backend=backend_id).set(policy.probability)
-        ROUTING_SCORE.labels(backend=backend_id).set(policy.score)
-        ESTIMATED_CAPACITY.labels(backend=backend_id).set(policy.capacity)

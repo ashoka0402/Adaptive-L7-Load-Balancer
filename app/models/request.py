@@ -19,10 +19,6 @@ class RequestContext:
     start_time: float = field(default_factory=time.monotonic)
     backend_id: str | None = None
     retry_count: int = 0
-    selected_latency: float = 0.0
-    routing_reason: str = ""
-    request_class: str = "default"
-    eligible_backend_ids: frozenset[str] = field(default_factory=frozenset)
     attempted_backend_ids: set[str] = field(default_factory=set)
     response_started: bool = False
     hop_headers: set[str] = field(default_factory=set)

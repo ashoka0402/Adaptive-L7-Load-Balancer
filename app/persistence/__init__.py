@@ -1,4 +1,4 @@
-"""Persistence adapters for policy snapshots and experiment results."""
+"""Persistence adapters for experiment results."""
 
 from app.persistence.sqlite import SQLiteStore
 

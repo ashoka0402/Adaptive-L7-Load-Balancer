@@ -11,12 +11,10 @@ from aiohttp import web
 from pydantic import ValidationError
 
 from app.app_keys import CONFIG_KEY
-from app.experiments.live_shadow import LiveShadow
 from app.experiments.manager import TERMINAL, ExperimentManager
 from app.experiments.spec import ExperimentSpec
 
 EXPERIMENTS_KEY = web.AppKey("experiments",ExperimentManager)
-SHADOW_KEY = web.AppKey("live_shadow", LiveShadow)
 
 
 def authorize(request: web.Request) -> None:
@@ -77,6 +75,8 @@ async def control(request: web.Request) -> web.Response:
             raise web.HTTPNotFound()
         try:
             new=manager.start(ExperimentSpec.model_validate(saved["spec"]))
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
         except RuntimeError as exc:
             return web.json_response({"error":str(exc)},status=409)
         return web.json_response(new.info(),status=202)
@@ -134,15 +134,8 @@ async def stream(request: web.Request) -> web.StreamResponse:
     return response
 
 
-async def live_shadow(request: web.Request) -> web.Response:
-    authorize(request)
-    return web.json_response(request.app[SHADOW_KEY].report())
-
-
-def setup_experiment_routes(app: web.Application, manager: ExperimentManager, shadow: LiveShadow) -> None:
+def setup_experiment_routes(app: web.Application, manager: ExperimentManager) -> None:
     app[EXPERIMENTS_KEY]=manager
-    app[SHADOW_KEY]=shadow
-    app.router.add_get("/admin/shadow", live_shadow)
     app.router.add_post("/admin/experiments",create)
     app.router.add_get("/admin/experiments",history)
     app.router.add_get("/admin/experiments/{id}",result)

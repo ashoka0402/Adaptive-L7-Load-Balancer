@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Pulse — Adaptive Traffic Intelligence Engine",
+        description="Pulse — HTTP Load Balancer",
     )
     p.add_argument(
         "-c",
@@ -44,7 +44,6 @@ def parse_args() -> argparse.Namespace:
             "weighted_round_robin",
             "least_connections",
             "latency_aware",
-            "adaptive",
         ],
         help="Override load-balancing strategy",
     )

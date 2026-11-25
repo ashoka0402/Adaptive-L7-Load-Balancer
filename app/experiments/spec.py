@@ -7,9 +7,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Algorithm = Literal["round_robin", "weighted_round_robin", "least_connections",
-                    "latency_aware", "adaptive", "predictive", "autopilot", "learning"]
+                    "latency_aware"]
 ALGORITHMS = ("round_robin", "weighted_round_robin", "least_connections",
-              "latency_aware", "adaptive", "predictive", "autopilot", "learning")
+              "latency_aware")
 
 
 class StrictModel(BaseModel):
@@ -58,7 +58,7 @@ def default_nodes() -> list[NodeSpec]:
 
 
 def default_algorithms() -> list[Algorithm]:
-    return ["round_robin", "adaptive"]
+    return ["round_robin", "latency_aware"]
 
 
 class ExperimentSpec(StrictModel):
@@ -77,8 +77,6 @@ class ExperimentSpec(StrictModel):
     faults: list[Fault] = Field(default_factory=list, max_length=32)
     slo_ms: float = Field(default=100, gt=0, le=60000)
     timeout_ms: float = Field(default=2000, ge=10, le=10000)
-    shadow: list[Algorithm] = Field(default_factory=list, max_length=4)
-    shadow_every: int = Field(default=20, ge=1, le=1000)
     objective: Literal["latency", "throughput", "reliability", "balanced"] = "balanced"
 
     @model_validator(mode="after")

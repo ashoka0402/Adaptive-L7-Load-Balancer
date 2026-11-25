@@ -11,37 +11,18 @@ from collections import Counter, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from app.config import AdaptiveConfig, IntelligenceConfig, RequestClassRule
-from app.control.controller import AdaptiveController
-from app.control.intelligence import percentile
 from app.experiments.spec import ExperimentSpec, Fault, NodeSpec, trace
 from app.models.backend import Backend, BackendRegistry
-from app.routing.adaptive import AdaptiveStrategy
 from app.routing.base import LoadBalancingStrategy
 from app.routing.latency_aware import LatencyAwareStrategy
 from app.routing.least_connections import LeastConnectionsStrategy
 from app.routing.round_robin import RoundRobinStrategy
 from app.routing.weighted_round_robin import WeightedRoundRobinStrategy
-from app.telemetry.pipeline import TelemetryPipeline
 
 Progress = Callable[[dict], Awaitable[None]]
-ADAPTIVE = {"adaptive", "predictive", "autopilot", "learning"}
 
 
-def adaptive_config(name: str, seed: int, spec: ExperimentSpec) -> AdaptiveConfig:
-    return AdaptiveConfig(interval=.1, slow_start_seconds=1, intelligence=IntelligenceConfig(
-        enabled=name in {"predictive", "autopilot", "learning"},
-        autopilot=name in {"autopilot", "learning"}, learning=name == "learning",
-        learning_seed=seed, horizon_seconds=.5, policy_cooldown=1,
-        p99_target_seconds=spec.slo_ms / 1000, objective=spec.objective,
-        rules=[RequestClassRule(name=c, path_prefix="/" + c)
-               for c in ("light", "compute", "database", "streaming")],
-    ))
-
-
-def strategy(name: str, controller: AdaptiveController, seed: int) -> LoadBalancingStrategy:
-    if name in ADAPTIVE:
-        return AdaptiveStrategy(controller, random.Random(seed))
+def strategy(name: str) -> LoadBalancingStrategy:
     factories: dict[str, Callable[[], LoadBalancingStrategy]] = {
         "round_robin": RoundRobinStrategy, "weighted_round_robin": WeightedRoundRobinStrategy,
         "least_connections": LeastConnectionsStrategy, "latency_aware": LatencyAwareStrategy,
@@ -88,6 +69,13 @@ def service(node: Node, seed: int, request_id: int, request_class: str) -> tuple
     return (ms * rng.uniform(.9, 1.1) + node.extra_ms) / 1000, rng.random() >= node.error_rate
 
 
+def percentile(values: list[float], quantile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(quantile * len(ordered)) - 1)]
+
+
 def summarize(rows: list[dict], spec: ExperimentSpec, elapsed: float) -> dict:
     measured = [r for r in rows if r["arrival"] >= spec.warmup]
     latencies = [r["latency_ms"] for r in measured]
@@ -117,16 +105,7 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
         b = Backend(n.id, "simulation", 1, capacity=n.capacity, weight=n.weight, registered_at=0)
         registry.add(b)
         nodes[n.id] = Node(n, b, n.capacity, error_rate=n.error_rate)
-    telemetry = TelemetryPipeline()
-    controller = AdaptiveController(registry, telemetry, adaptive_config(algorithm, seed, spec))
-    router = strategy(algorithm, controller, seed)
-    shadow_controllers = {name: AdaptiveController(registry, telemetry, adaptive_config(name,seed,spec))
-                          for name in spec.shadow if name in ADAPTIVE}
-    shadows = {name: strategy(name, shadow_controllers.get(name,controller), seed+1) for name in spec.shadow}
-    shadow_stats: dict[str, dict] = {name: {"samples": 0, "disagreements": 0,
-                                          "estimated_latency_delta_ms_sum": 0.0,
-                                          "estimated_error_delta_sum": 0.0}
-                                    for name in shadows}
+    router = strategy(algorithm)
     arrivals = trace(spec, seed)
     events: list[tuple[float, int, int, str, object]] = []
     sequence = 0
@@ -135,8 +114,6 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
     current = 0.0
     total_active = 0
     completed_ids: set[int] = set()
-    policy_changes = 0
-    last_weights: dict = {}
     busy_area = {n.id: 0.0 for n in spec.nodes}
     queue_area = {n.id: 0.0 for n in spec.nodes}
     capacity_area = {n.id: 0.0 for n in spec.nodes}
@@ -165,16 +142,8 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
         elapsed = max(0.0, current-arrival)
         rows.append({"id": rid, "arrival": arrival, "completed": current, "class": cls,
                      "backend": bid, "status": status, "latency_ms": elapsed*1000})
-        controller.intelligence.observe_client(elapsed, status == "ok", now=current)
-        for other in shadow_controllers.values():
-            other.intelligence.observe_client(elapsed,status == "ok",now=current)
         if bid is not None:
             node = nodes[bid]
-            telemetry.record(bid, elapsed, status == "ok")
-            controller.intelligence.observe(bid, cls, elapsed, status == "ok",
-                                            node.backend.active_connections, now=current)
-            for other in shadow_controllers.values():
-                other.intelligence.observe(bid,cls,elapsed,status == "ok",node.backend.active_connections,now=current)
             if status == "ok":
                 node.backend.record_success(elapsed)
             else:
@@ -215,24 +184,11 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
         elif kind == "arrival":
             rid, arrival, cls = payload  # type: ignore[misc]
             candidates = [n.backend for n in nodes.values() if not n.down]
-            selected = await (router.select_for_class(candidates, cls) if isinstance(router, AdaptiveStrategy)
-                              else router.select_backend(candidates))
+            selected = await router.select_backend(candidates)
             if selected is None or total_active >= spec.concurrency:
                 finish(rid, arrival, cls, None, "dropped")
             else:
                 node = nodes[selected.id]
-                if rid % spec.shadow_every == 0:
-                    for name, shadow in shadows.items():
-                        alt = await shadow.select_backend(candidates)
-                        if alt:
-                            other = nodes[alt.id]
-                            stats = shadow_stats[name]
-                            stats["samples"] += 1
-                            stats["disagreements"] += int(alt.id != selected.id)
-                            def estimate(n: Node) -> float:
-                                return (n.spec.latency_ms+n.extra_ms)*(1+len(n.queue)/max(1,n.capacity))
-                            stats["estimated_latency_delta_ms_sum"] += estimate(other)-estimate(node)
-                            stats["estimated_error_delta_sum"] += other.error_rate-node.error_rate
                 if len(node.active) >= node.capacity and len(node.queue) >= node.spec.queue_limit:
                     finish(rid, arrival, cls, None, "dropped")
                 else:
@@ -259,26 +215,13 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
         for bid, node in nodes.items():
             node.backend.active_connections = len(node.active) + len(node.queue)
             peak_queue = max(peak_queue, len(node.queue))
-            telemetry.update_external(bid, queue_depth=len(node.queue),
-                                      cpu=min(1,len(node.active)/node.capacity), now=current)
         if kind == "tick":
-            snapshot = controller.publish(now=current)
-            for shadow_controller in shadow_controllers.values():
-                shadow_controller.publish(now=current)
-            weights = controller.intelligence_status()["weights"]
-            if weights != last_weights:
-                policy_changes += 1
-                last_weights = weights.copy()
             if current <= spec.duration+spec.warmup or len(completed_ids) < len(arrivals):
                 frame = {"time": current, "completed": len(rows), "offered": len(arrivals),
                          "nodes": {bid: {"active": len(n.active), "queue": len(n.queue),
-                                         "capacity": n.capacity, "down": n.down, "routed": routed[bid],
-                                         "probability": (snapshot.policies[bid].probability if bid in snapshot.policies else 0) if algorithm in ADAPTIVE else None}
+                                         "capacity": n.capacity, "down": n.down, "routed": routed[bid]}
                                    for bid,n in nodes.items()},
-                         "successes": successes,
-                         "policy_version": snapshot.version, "weights": weights.copy(),
-                         "predictions": dict(controller.intelligence.predictions),
-                         "reason": controller.autopilot.reason}
+                         "successes": successes}
                 timeline.append(frame)
                 await progress(frame)
         if processed % 256 == 0:
@@ -288,7 +231,7 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
     rows.sort(key=lambda row: row["id"])
     elapsed = max(spec.duration, max((r["completed"] for r in rows), default=0)-spec.warmup)
     summary = summarize(rows, spec, elapsed)
-    summary.update({"peak_queue": peak_queue, "policy_changes": policy_changes,
+    summary.update({"peak_queue": peak_queue,
                     "mean_backend_utilization": {bid: busy_area[bid]/max(.000001,capacity_area[bid]) for bid in nodes},
                     "mean_backend_queue": {bid: queue_area[bid]/max(.000001,current-spec.warmup) for bid in nodes}})
     recovery = []
@@ -300,14 +243,8 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
             recovery.append({"backend":fault.backend,"restore_at":fault.at,
                              "first_success_seconds":first["completed"]-fault.at if first else None})
     summary["recovery"] = recovery
-    for stats in shadow_stats.values():
-        count = max(1, stats["samples"])
-        stats["disagreement_rate"] = stats["disagreements"]/count
-        stats["estimated_latency_delta_ms"] = stats.pop("estimated_latency_delta_ms_sum")/count
-        stats["estimated_error_delta"] = stats.pop("estimated_error_delta_sum")/count
     return {"algorithm": algorithm, "seed": seed, "mode": "simulation", "summary": summary,
-            "timeline": timeline, "requests": rows, "shadow": shadow_stats,
-            "shadow_note": "Model estimates on the primary policy's state, not measured counterfactuals."}
+            "timeline": timeline, "requests": rows}
 
 
 def ranking(runs: list[dict], objective: str) -> list[dict]:

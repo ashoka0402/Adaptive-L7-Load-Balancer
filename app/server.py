@@ -9,10 +9,8 @@ import sqlite3
 from aiohttp import web
 
 from app.admin.routes import setup_admin_routes
-from app.app_keys import CONFIG_KEY, CONTROLLER_KEY, REGISTRY_KEY, TELEMETRY_KEY
+from app.app_keys import CONFIG_KEY, REGISTRY_KEY
 from app.config import AppConfig
-from app.control.controller import AdaptiveController
-from app.experiments.live_shadow import LiveShadow
 from app.experiments.manager import ExperimentManager
 from app.experiments.routes import setup_experiment_routes
 from app.health.active import ActiveHealthChecker
@@ -25,26 +23,18 @@ from app.proxy import ReverseProxy
 from app.resilience.backpressure import BackpressureController
 from app.resilience.circuit_breaker import CircuitBreaker
 from app.resilience.retry import RetryPolicy
-from app.routing.adaptive import AdaptiveStrategy
 from app.routing.base import LoadBalancingStrategy
 from app.routing.latency_aware import LatencyAwareStrategy
 from app.routing.least_connections import LeastConnectionsStrategy
 from app.routing.round_robin import RoundRobinStrategy
 from app.routing.weighted_round_robin import WeightedRoundRobinStrategy
-from app.telemetry.pipeline import TelemetryPipeline
 from app.ui.routes import setup_console
 from app.ui.telemetry import ConsoleTelemetry
 
 logger = logging.getLogger(__name__)
 
 
-def build_strategy(
-    name: str, controller: AdaptiveController | None = None
-) -> LoadBalancingStrategy:
-    if name == "adaptive":
-        if controller is None:
-            raise ValueError("adaptive strategy requires a controller")
-        return AdaptiveStrategy(controller)
+def build_strategy(name: str) -> LoadBalancingStrategy:
     mapping: dict[str, LoadBalancingStrategy] = {
         "round_robin": RoundRobinStrategy(),
         "weighted_round_robin": WeightedRoundRobinStrategy(),
@@ -71,24 +61,17 @@ class LoadBalancerApp:
                     capacity=bc.capacity,
                 )
             )
-        self.telemetry = TelemetryPipeline(config.adaptive.window_size)
         self.store = None
         if config.persistence.enabled:
-            self.store = SQLiteStore(
-                config.persistence.path, snapshot_limit=config.persistence.snapshot_limit
-            )
+            self.store = SQLiteStore(config.persistence.path)
             try:
                 self.store.initialize()
             except (OSError, sqlite3.Error):
-                logger.exception("persistence unavailable; continuing without policy history")
+                logger.exception("persistence unavailable; continuing without experiment history")
                 self.store = None
         self.experiments = ExperimentManager(self.store)
-        self.shadow = LiveShadow(config.shadow)
         self.console = ConsoleTelemetry()
-        self.controller = AdaptiveController(
-            self.registry, self.telemetry, config.adaptive, self.store
-        )
-        self.strategy = build_strategy(config.load_balancing.strategy, self.controller)
+        self.strategy = build_strategy(config.load_balancing.strategy)
         self.pool = ConnectionPool(config.connection_pool, config.timeouts)
         self.circuit = CircuitBreaker(config.circuit_breaker)
         self.retry_policy = RetryPolicy(config.retry)
@@ -102,10 +85,18 @@ class LoadBalancerApp:
         self._metrics_task: asyncio.Task | None = None
         self._shutdown = asyncio.Event()
 
+    def switch_strategy(self, name: str) -> None:
+        from app.config import LoadBalancingConfig
+
+        selected = LoadBalancingConfig.model_validate({"strategy": name}).strategy
+        strategy = build_strategy(selected)
+        self.strategy = strategy
+        self.config.load_balancing.strategy = selected
+        if self.proxy is not None:
+            self.proxy.strategy = strategy
+
     async def start(self) -> None:
         await self.pool.start()
-        await self.controller.start()
-        self.shadow.start()
         self.health_checker = ActiveHealthChecker(
             self.registry, self.config.health_check, self.pool.session
         )
@@ -120,18 +111,14 @@ class LoadBalancerApp:
             self.retry_policy,
             self.passive,
             self.backpressure,
-            self.telemetry,
-            self.shadow,
             self.console,
         )
 
         self.app = web.Application(client_max_size=self.config.request.max_body_size)
         self.app[CONFIG_KEY] = self.config
         self.app[REGISTRY_KEY] = self.registry
-        self.app[CONTROLLER_KEY] = self.controller
-        self.app[TELEMETRY_KEY] = self.telemetry
-        setup_admin_routes(self.app)
-        setup_experiment_routes(self.app, self.experiments, self.shadow)
+        setup_admin_routes(self.app, self.switch_strategy)
+        setup_experiment_routes(self.app, self.experiments)
         setup_console(self.app, self.console, self.backpressure)
         self.app.router.add_route("*", "/{path:.*}", self.proxy.handle)
 
@@ -157,7 +144,6 @@ class LoadBalancerApp:
     async def _metrics_loop(self) -> None:
         while not self._shutdown.is_set():
             metrics.update_backend_gauges(self.registry)
-            metrics.update_adaptive_gauges(self.controller.snapshot)
             metrics.QUEUE_SIZE.set(self.backpressure.queue_size)
             try:
                 await asyncio.wait_for(self._shutdown.wait(), timeout=2.0)
@@ -169,7 +155,6 @@ class LoadBalancerApp:
         if self.site:
             await self.site.stop()
         await self.experiments.stop()
-        await self.shadow.stop()
         self._shutdown.set()
         if self._metrics_task:
             self._metrics_task.cancel()
@@ -179,7 +164,6 @@ class LoadBalancerApp:
                 pass
         if self.health_checker:
             await self.health_checker.stop()
-        await self.controller.stop()
         if self.runner:
             await self.runner.cleanup()
         await self.pool.stop()

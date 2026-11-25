@@ -6,7 +6,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from app.app_keys import CONFIG_KEY, CONTROLLER_KEY, REGISTRY_KEY, TELEMETRY_KEY
+from app.app_keys import CONFIG_KEY, REGISTRY_KEY
 from app.experiments.routes import authorize
 from app.resilience.backpressure import BackpressureController
 from app.ui.telemetry import ConsoleTelemetry
@@ -38,26 +38,18 @@ async def asset(request: web.Request) -> web.FileResponse:
 async def overview(request: web.Request) -> web.Response:
     authorize(request)
     config = request.app[CONFIG_KEY]
-    controller = request.app[CONTROLLER_KEY]
     registry = request.app[REGISTRY_KEY]
-    pipeline = request.app[TELEMETRY_KEY]
     pressure = request.app[PRESSURE]
     nodes = []
     for backend in registry.list_all():
         data = backend.to_dict()
-        observed = pipeline.snapshot(backend.id)
-        policy = controller.snapshot.policies.get(backend.id)
-        data.update({"eligible": backend.is_available, "queue": observed.queue_depth,
-                     "observed_error_rate": observed.error_rate if observed.samples else None,
-                     "cpu": observed.cpu, "memory": observed.memory,
-                     "probability": policy.probability if policy and config.load_balancing.strategy == "adaptive" else None})
+        data["eligible"] = backend.is_available
         nodes.append(data)
     return web.json_response({
         "timestamp": time.time(), "strategy": config.load_balancing.strategy,
         "mode": "live", "metrics": request.app[TELEMETRY].snapshot(),
         "active": pressure.current_active, "queue": pressure.queue_size,
         "rejected": pressure.rejected_total, "backends": nodes,
-        "policy": controller.snapshot.to_dict(), "intelligence": controller.intelligence_status(),
     }, headers={"Cache-Control": "no-store"})
 
 

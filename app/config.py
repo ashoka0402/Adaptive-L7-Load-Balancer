@@ -28,79 +28,7 @@ class LoadBalancingConfig(ConfigModel):
         "weighted_round_robin",
         "least_connections",
         "latency_aware",
-        "adaptive",
-    ] = "adaptive"
-
-
-class AdaptiveWeightsConfig(ConfigModel):
-    latency: float = Field(default=0.35, ge=0)
-    connections: float = Field(default=0.25, ge=0)
-    queue: float = Field(default=0.15, ge=0)
-    errors: float = Field(default=0.20, ge=0)
-    resources: float = Field(default=0.05, ge=0)
-
-
-class RequestClassRule(ConfigModel):
-    name: str = Field(min_length=1, max_length=40, pattern=r"^[a-zA-Z0-9_-]+$")
-    path_prefix: str = Field(default="/", min_length=1, max_length=256)
-    methods: list[str] = Field(default_factory=list, max_length=16)
-    headers: dict[str, str] = Field(default_factory=dict, max_length=8)
-    backend_ids: list[str] = Field(default_factory=list, max_length=100)
-
-
-class IntelligenceConfig(ConfigModel):
-    enabled: bool = False
-    autopilot: bool = False
-    objective: Literal["balanced", "latency", "throughput", "reliability", "custom"] = "balanced"
-    learning: bool = False
-    learning_seed: int = 7
-    learning_exploration: float = Field(default=0.03, ge=0, le=0.1)
-    window_size: int = Field(default=500, ge=20, le=5000)
-    observation_seconds: float = Field(default=30, ge=1, le=300)
-    trend_points: int = Field(default=8, ge=3, le=60)
-    horizon_seconds: float = Field(default=3, gt=0, le=60)
-    congestion_threshold: float = Field(default=0.7, gt=0, lt=1)
-    prediction_weight: float = Field(default=0.35, ge=0, le=1)
-    p99_target_seconds: float = Field(default=0.1, gt=0, le=60)
-    error_target: float = Field(default=0.01, gt=0, le=1)
-    availability_target: float = Field(default=0.99, ge=0, le=1)
-    throughput_target: float = Field(default=0, ge=0, le=1000000)
-    minimum_samples: int = Field(default=20, ge=5, le=5000)
-    policy_cooldown: float = Field(default=10, ge=1, le=300)
-    weight_step: float = Field(default=0.15, gt=0, le=0.25)
-    rollback_margin: float = Field(default=0.5, gt=0, le=100)
-    rules: list[RequestClassRule] = Field(default_factory=list, max_length=16)
-
-    @model_validator(mode="after")
-    def validate_intelligence(self) -> IntelligenceConfig:
-        if self.learning and not self.autopilot:
-            raise ValueError("learning requires autopilot")
-        if self.autopilot and not self.enabled:
-            raise ValueError("autopilot requires intelligence")
-        if self.minimum_samples > self.window_size:
-            raise ValueError("minimum_samples exceeds window_size")
-        names = [rule.name for rule in self.rules]
-        if len(set(names)) != len(names) or "default" in names:
-            raise ValueError("request class names must be unique and not reserved")
-        return self
-
-
-class AdaptiveConfig(ConfigModel):
-    interval: float = Field(default=1.0, gt=0)
-    window_size: int = Field(default=100, ge=10)
-    exploration: float = Field(default=0.03, ge=0, le=0.30)
-    min_probability: float = Field(default=0.005, ge=0, le=0.10)
-    slow_start_seconds: float = Field(default=30.0, ge=0)
-    smoothing: float = Field(default=0.30, gt=0, le=1)
-    max_probability_step: float = Field(default=0.15, gt=0, le=1)
-    weights: AdaptiveWeightsConfig = Field(default_factory=AdaptiveWeightsConfig)
-    intelligence: IntelligenceConfig = Field(default_factory=IntelligenceConfig)
-
-    @model_validator(mode="after")
-    def ensure_weight(self) -> AdaptiveConfig:
-        if sum(self.weights.model_dump().values()) <= 0:
-            raise ValueError("at least one adaptive metric weight must be positive")
-        return self
+    ] = "round_robin"
 
 
 class BackendConfig(ConfigModel):
@@ -202,29 +130,11 @@ class RequestConfig(ConfigModel):
 class PersistenceConfig(ConfigModel):
     enabled: bool = True
     path: str = "data/pulse.db"
-    snapshot_limit: int = Field(default=500, ge=1, le=10000)
-
-
-class ShadowConfig(ConfigModel):
-    enabled: bool = False
-    sample_every: int = Field(default=100, ge=10, le=10000)
-    queue_limit: int = Field(default=64, ge=1, le=256)
-    algorithms: tuple[Literal["round_robin", "weighted_round_robin", "least_connections", "latency_aware"], ...] = Field(
-        default=("round_robin", "least_connections"), max_length=4
-    )
-
-    @model_validator(mode="after")
-    def unique_algorithms(self) -> ShadowConfig:
-        if len(set(self.algorithms)) != len(self.algorithms):
-            raise ValueError("duplicate shadow algorithm")
-        return self
 
 
 class AppConfig(ConfigModel):
-    shadow: ShadowConfig = Field(default_factory=ShadowConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     load_balancing: LoadBalancingConfig = Field(default_factory=LoadBalancingConfig)
-    adaptive: AdaptiveConfig = Field(default_factory=AdaptiveConfig)
     backends: list[BackendConfig] = Field(default_factory=list, max_length=100)
     allowed_dynamic_destinations: list[AllowedDestination] = Field(default_factory=list, max_length=100)
 
