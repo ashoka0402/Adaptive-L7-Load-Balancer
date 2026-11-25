@@ -10,3 +10,5 @@ GET /admin/experiments/{id} returns state and summaries; append ?full=true for r
 HTTP mode uses freshly created loopback listeners; external targets are not accepted. Simulation models finite-capacity queues with seeded request/backend outcomes. Scheduled synthetic faults are available in the API and offline benchmark config. Neither mode represents independent production machines.
 
 Run `python -m benchmarks.run_arena --output reports/arena.json` or `docker compose -f docker-compose.lab.yml run --rm arena` (create the reports directory first).
+
+On Linux, use `PULSE_UID=$(id -u) PULSE_GID=$(id -g) docker compose -f docker-compose.lab.yml run --rm arena` to write reports as your local user. The runner retains no network and no extra capabilities.

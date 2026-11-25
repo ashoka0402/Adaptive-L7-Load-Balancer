@@ -44,14 +44,14 @@ function renderLive(data,append=true){
 }
 async function refresh(){
  if(!online||loading)return;loading=true;
- try{renderLive(await api("console"))}catch(e){notice(e.message)}finally{loading=false}
+ try{const data=await api("console");if(online)renderLive(data)}catch(e){notice(e.message)}finally{loading=false}
 }
 document.querySelectorAll("[data-page]").forEach(btn=>btn.addEventListener("click",()=>{
  const id=btn.dataset.page;for(const page of ["dashboard","arena"])$(page).hidden=id!==page;
  document.querySelectorAll("[data-page]").forEach(b=>{b.classList.toggle("active",b===btn);if(b===btn)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")});
  if(id==="dashboard"){chart("rate-chart","rate","#2563eb");chart("latency-chart","latency","#0f766e")}
 }));
-$("auth-button").addEventListener("click",()=>{if(online){token="";trafficStop=true;setConnected(false);return}$("auth-error").textContent="";$("auth-dialog").showModal()});
+$("auth-button").addEventListener("click",()=>{if(online){token="";trafficStop=true;setConnected(false);notice("Disconnected · showing last observed metrics.");return}$("auth-error").textContent="";$("auth-dialog").showModal()});
 $("close-auth").addEventListener("click",()=>$("auth-dialog").close());
 $("auth-form").addEventListener("submit",async e=>{
  e.preventDefault();token=$("token").value;

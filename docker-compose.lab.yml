@@ -4,6 +4,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+    user: "${PULSE_UID:-1000}:${PULSE_GID:-1000}"
     network_mode: none
     read_only: true
     tmpfs:

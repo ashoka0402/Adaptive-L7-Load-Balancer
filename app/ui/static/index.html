@@ -19,9 +19,9 @@
     <div class="heading"><div><p class="eyebrow">LIVE TRAFFIC</p><h1>Load balancer</h1><p>Watch real requests flow through your backend servers.</p></div><div class="control"><label for="strategy">Routing algorithm</label><select id="strategy" disabled></select><small>Runtime only · resets on restart</small></div></div>
     <div class="metrics">
       <article><span>Total requests</span><strong id="total">—</strong><small>Since engine start</small></article>
-      <article><span>Throughput</span><strong id="rps">—</strong><small>Successful req/s · last second</small></article>
+      <article><span>Throughput</span><strong id="rps">—</strong><small>Sampled successful req/s · last second</small></article>
       <article><span>p95 latency</span><strong id="latency">—</strong><small>Rolling window</small></article>
-      <article><span>Failed requests</span><strong id="errors">—</strong><small>Since engine start</small></article>
+      <article><span>Failed requests</span><strong id="errors">—</strong><small>Server failures and cancellations</small></article>
     </div>
     <div class="charts"><article class="panel"><h2>Request rate</h2><p>Successful responses / second</p><canvas id="rate-chart" aria-label="Request rate over time"></canvas></article><article class="panel"><h2>Response latency</h2><p>p95 in milliseconds</p><canvas id="latency-chart" aria-label="Response latency over time"></canvas></article></div>
     <article class="panel"><div class="panel-title"><div><h2>Backend servers</h2><p>Request distribution, health and active connections.</p></div><span id="active">—</span></div>
@@ -40,6 +40,6 @@
     <p class="footnote">Same seed, arrival schedule and three backend profiles for each algorithm. HTTP runs share this host and may vary with scheduling; these results are not a production capacity claim.</p>
   </section>
 </main>
-<dialog id="auth-dialog"><form id="auth-form"><h2>Connect engine</h2><p>Enter the token from PULSE_ADMIN_TOKEN.</p><label>Admin token<input id="token" type="password" autocomplete="off" required></label><div class="dialog-actions"><button type="button" id="close-auth">Cancel</button><button class="primary" type="submit">Connect</button></div><p id="auth-error" role="alert"></p></form></dialog>
+<dialog id="auth-dialog" aria-labelledby="auth-title"><form id="auth-form"><h2 id="auth-title">Connect engine</h2><p>Enter the token from PULSE_ADMIN_TOKEN.</p><label>Admin token<input id="token" type="password" autocomplete="off" required></label><div class="dialog-actions"><button type="button" id="close-auth">Cancel</button><button class="primary" type="submit">Connect</button></div><p id="auth-error" role="alert"></p></form></dialog>
 </body>
 </html>
