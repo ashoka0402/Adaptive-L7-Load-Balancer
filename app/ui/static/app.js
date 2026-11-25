@@ -1,249 +1,97 @@
-import {ALGORITHMS,TERMINAL,esc,num,pct,clamp,algorithmName,frameAt,topologyNodes,liveNodes,seriesFromRequests,runProgress,validateDraft} from "./model.js";
-
-const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const main=$("#main");
-const pages=[
- ["home","Product","01","M3 12h18M12 3v18M5 5l14 14M19 5L5 19"],
- ["overview","Overview","01","M3 3h8v8H3zM13 3h8v5h-8zM3 13h8v8H3zM13 10h8v11h-8z"],
- ["topology","Live topology","01","M4 12h7m2 0h7M12 12V4m0 8v8M2 10h4v4H2zM10 2h4v4h-4zM18 10h4v4h-4zM10 18h4v4h-4z"],
- ["lab","Traffic lab","02","M9 3h6m-5 0v7l-6 9a1 1 0 0 0 1 2h14a1 1 0 0 0 1-2l-6-9V3M7 15h10"],
- ["arena","Battle arena","02","M4 3l15 15M20 3L5 18M3 16l5 5m13-5-5 5M3 3h5v5m13-5h-5v5"],
- ["chaos","Chaos studio","02","M13 2L4 14h7l-1 8 10-12h-7z"],
- ["replay","Traffic replay","02","M4 11a8 8 0 1 1 2 6M4 4v7h7M12 7v5l3 2"],
- ["autopilot","Autopilot","03","M3 12h3l3-7 4 14 3-7h5M3 3h18v18H3z"],
- ["intelligence","Backend intelligence","03","M4 4h16v7H4zM4 13h16v7H4zM7 7h.01M7 16h.01M11 7h6m-6 9h6"],
- ["observability","Observability","03","M3 20V4M3 20h18M6 16l4-5 4 2 6-8"],
- ["config","Configuration","03","M4 6h16M4 12h16M4 18h16M8 3v6m8 0v6m-6 0v6"]
-];
-const navGroups={"01":"MONITOR","02":"EXPERIMENT","03":"INTELLIGENCE"};
-const defaults=()=>({mode:"simulation",algorithms:["round_robin","adaptive","predictive"],seed:7,repetitions:1,rps:240,duration:8,warmup:0,concurrency:100,total_requests:null,pattern:"burst",rate_schedule:[],slo_ms:100,timeout_ms:2000,shadow:[],shadow_every:20,objective:"balanced",nodes:[{id:"b1",capacity:6,latency_ms:10,weight:1,queue_limit:32,error_rate:0},{id:"b2",capacity:10,latency_ms:20,weight:2,queue_limit:32,error_rate:0},{id:"b3",capacity:8,latency_ms:30,weight:1,queue_limit:32,error_rate:0}],faults:[]});
-let draft=defaults(),token="",connected=false,live=null,previousLive=null,history=[],jobs=[],saved=[],job=null,fullJob=null,shadow=null,selectedNode="",page="home",replayTime=0,playing=false,speed=1,replaySeed=null,replayAlgo="",noticeTimer,polling=false,liveLoading=false,jobPolling=false,epoch=0;
-let topologyViews=new Map(),animationId=0,lastAnimation=0,playClock=0,seriesCache=new WeakMap(),streamAbort=null;
-const icon=path=>'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="'+path+'"/></svg>';
-function nav(){
- let group="";$("#nav").innerHTML=pages.map(([id,label,g,path])=>{
- const prefix=g!==group?'<div class="nav-group">'+navGroups[g]+'</div>':"";group=g;
- return prefix+'<a class="nav-link '+(page===id?"active":"")+'" href="#'+id+'" '+(page===id?'aria-current="page"':"")+'>'+icon(path)+esc(label)+'</a>';
- }).join("");
+import {ALGORITHMS,esc,number,share,arenaSpec} from "./model.js";
+const $=id=>document.getElementById(id);
+let token="",online=false,loading=false,history=[],jobId=null,jobBusy=false,generating=false,trafficStop=false;
+const terminal=new Set(["completed","cancelled","failed"]);
+const options=Object.entries(ALGORITHMS).map(([key,label])=>'<option value="'+key+'">'+label+'</option>').join("");
+$("strategy").innerHTML=options;
+function notice(s){$("notice").textContent=s}
+function setConnected(value){
+ online=value; $("connection").textContent=value?"Connected":"Not connected";
+ $("auth-button").textContent=value?"Disconnect":"Connect";
+ $("strategy").disabled=!value; $("generate").disabled=!value||generating; $("run-arena").disabled=!value||jobBusy;
+ $("cancel-arena").disabled=!value||!jobBusy;
 }
-function setConnection(status){
- connected=status==="online";$("#connection").className="connection "+status;
- $("#connection").innerHTML="<i></i> "+(connected?"Engine connected":status==="error"?"Disconnected":"Not connected");
- $("#auth-button").textContent=token?"Disconnect":"Connect engine";
-}
-function toast(message,error=false){
- const el=$("#notice");el.textContent=message;el.className=error?"error":"";
- clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>{el.textContent=""},6500);
-}
-async function api(path,options={}){
- if(!token)throw Error("Connect your engine first.");
- const {body,...rest}=options;
- const res=await fetch("/admin/"+path,{...rest,headers:{"Authorization":"Bearer "+token,...(body!==undefined?{"Content-Type":"application/json"}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
- if(!res.ok){let message="Request failed ("+res.status+")";try{const j=await res.json();message=j.error??message}catch{}
- if(res.status===401)setConnection("error");throw Error(message);}
+async function api(path,method="GET",body){
+ const res=await fetch("/admin/"+path,{method,headers:{Authorization:"Bearer "+token,...(body===undefined?{}:{"Content-Type":"application/json"})},...(body===undefined?{}:{body:JSON.stringify(body)}),cache:"no-store"});
+ if(!res.ok){if(res.status===401)setConnected(false);let msg="Request failed ("+res.status+")";try{msg=(await res.json()).error||msg}catch{}throw Error(msg)}
  return res.json();
 }
-function requireAuth(){if(!token){$("#auth-dialog").showModal();return false}return true}
-function panel(title,sub,content,id=""){return '<section class="panel" '+(id?'id="'+id+'"':"")+'><div class="panel-head"><div><h2>'+esc(title)+'</h2><p>'+esc(sub)+'</p></div></div>'+content+'</section>'}
-function header(k,title,desc,actions=""){return '<div class="page-head"><div><div class="eyebrow">'+esc(k)+'</div><h1>'+esc(title)+'</h1><p>'+esc(desc)+'</p></div><div class="actions">'+actions+'</div></div>'}
-const btn=(label,action,cls="secondary",extra="")=>'<button type="button" class="button '+cls+'" data-action="'+action+'" '+extra+'>'+esc(label)+'</button>';
-const empty=(label,desc="")=>'<div class="empty"><strong>'+esc(label)+'</strong>'+esc(desc)+'</div>';
-const chip=(label,cls="")=>'<span class="chip '+cls+'"><i></i>'+esc(label)+'</span>';
-const metric=(label,value,unit,desc)=>'<div class="panel metric"><div class="eyebrow">'+esc(label)+'</div><div class="metric-value">'+esc(value)+'<span>'+esc(unit)+'</span></div><span class="small">'+esc(desc)+'</span></div>';
-const kv=(label,value)=>'<div class="kv"><span>'+esc(label)+'</span><code>'+esc(value)+'</code></div>';
-const meter=(value,cls="")=>'<div class="meter"><i class="'+cls+'" style="width:'+clamp(Number(value)||0,0,100)+'%"></i></div>';
-const field=(label,name,value,type="number",attrs="")=>'<div class="field"><label for="'+name+'">'+esc(label)+'</label><input id="'+name+'" name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+attrs+'></div>';
-const select=(label,name,value,options)=>'<div class="field"><label for="'+name+'">'+esc(label)+'</label><select id="'+name+'" name="'+name+'">'+Object.entries(options).map(([v,l])=>'<option value="'+esc(v)+'" '+(v===value?"selected":"")+'>'+esc(l)+'</option>').join("")+'</select></div>';
-function topologyShell(id,tall=false){return '<div class="topology '+(tall?"tall":"")+'"><canvas data-topo="'+id+'" role="img" aria-label="Traffic topology. Backend details are also listed below or alongside."></canvas></div><div class="topo-caption"><span>Flow density = sampled routed/completed request rate</span><div class="legend"><span><i></i>Healthy</span><span><i class="warn"></i>Degraded</span><span><i class="bad"></i>Offline</span></div></div>'}
-function setTopology(id,nodes,label){topologyViews.set(id,{nodes:nodes??[],label})}
-function colorVars(){const s=getComputedStyle(document.documentElement);return Object.fromEntries(["panel","panel2","line","text","muted","mint","red","amber","blue","bg"].map(k=>[k,s.getPropertyValue("--"+k).trim()]))}
-function drawTopology(canvas,view,t){
- const {width:w,height:h}=canvas.getBoundingClientRect();if(!w||!h)return;const dpr=Math.min(devicePixelRatio||1,2);
- if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr)}
- const ctx=canvas.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
- const c=colorVars(),nodes=view?.nodes??[];const cx=w*.42,cy=h*.50,rx=w*.78,left=w*.14;
- const small=w<460;const nw=small?72:104,nh=nodes.length>5?28:44;const actualNodes=nodes.slice(0,8);const spacing=Math.min(57,(h-64)/Math.max(actualNodes.length,1));const totalRate=actualNodes.reduce((a,n)=>a+(n.rate??0),0);
- ctx.font="10px monospace";ctx.textAlign="center";ctx.textBaseline="middle";
- function box(x,y,bw,bh,title,sub,stroke=c.line,fill=c.panel){
-  ctx.beginPath();ctx.roundRect(x-bw/2,y-bh/2,bw,bh,7);ctx.fillStyle=fill;ctx.fill();ctx.strokeStyle=stroke;ctx.lineWidth=1;ctx.stroke();
-  ctx.fillStyle=c.text;ctx.font=(small?"9":"11")+"px monospace";ctx.fillText(title.slice(0,small?12:17),x,y-(sub?7:0),bw-8);
-  if(sub){ctx.fillStyle=stroke===c.line?c.muted:stroke;ctx.font="9px monospace";ctx.fillText(sub,x,y+8,bw-8)}
- }
- function wire(x1,y1,x2,y2,col,rate,seed){
-  const mid=(x1+x2)/2;ctx.beginPath();ctx.moveTo(x1,y1);ctx.bezierCurveTo(mid,y1,mid,y2,x2,y2);ctx.strokeStyle=col;ctx.globalAlpha=.50;ctx.lineWidth=rate>0?Math.min(4,1+Math.log1p(rate)/2):1;ctx.stroke();ctx.globalAlpha=1;
-  if(rate>0){const count=clamp(Math.ceil(Math.sqrt(rate)),1,18);for(let i=0;i<count;i++){const u=((t*.00036+i/count+seed)%1+1)%1;const v=1-u;const x=v*v*v*x1+3*v*v*u*mid+3*v*u*u*mid+u*u*u*x2;const y=v*v*v*y1+3*v*v*u*y1+3*v*u*u*y2+u*u*u*y2;ctx.beginPath();ctx.arc(x,y,2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();}}
- }
- ctx.strokeStyle=c.line;ctx.lineWidth=1;for(const r of [36,51,67]){ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke()}
- wire(left+nw/2,cy,cx-35,cy,c.blue,totalRate,0);
- actualNodes.forEach((n,i)=>{const y=cy+(i-(actualNodes.length-1)/2)*spacing;const col=n.down?c.red:(n.status==="RECOVERING"||n.status==="SATURATED"||n.status==="DRAINING"||(n.queue??0)>0)?c.amber:c.mint;
- wire(cx+35,cy,rx-nw/2,y,col,n.down?0:n.rate??0,i*.13);
- box(rx,y,nw,nh,n.id,nh>30?(n.down?"OFFLINE":num(n.rate,0)+(n.rate==null?"":" r/s")):"",col);
- });
- box(left,cy,nw,46,"CLIENTS",totalRate?num(totalRate,0)+" r/s":"",c.blue);
- box(cx,cy,70,58,"PULSE","ROUTER",c.mint);
- ctx.fillStyle=c.muted;ctx.font="10px monospace";ctx.textAlign="left";ctx.fillText(view?.label??"Awaiting engine telemetry",14,17,w-28);
- if(!actualNodes.length){ctx.textAlign="center";ctx.fillText("No backend telemetry",w*.77,cy,w*.32)}
- if(nodes.length>8){ctx.textAlign="right";ctx.fillText("+"+(nodes.length-8)+" more backends",w-12,h-15)}
+function chart(id,key,color){
+ const canvas=$(id),width=canvas.clientWidth,height=canvas.clientHeight;if(!width||!height)return;
+ const ratio=Math.min(devicePixelRatio||1,2);canvas.width=width*ratio;canvas.height=height*ratio;
+ const ctx=canvas.getContext("2d");ctx.scale(ratio,ratio);
+ const values=history.map(x=>x[key]);const max=Math.max(1,...values.filter(v=>Number.isFinite(v)));
+ const left=38,right=width-10,top=12,bottom=height-24;
+ ctx.font="11px system-ui";ctx.strokeStyle="#dce3eb";ctx.fillStyle="#64748b";ctx.lineWidth=1;
+ for(let i=0;i<=4;i++){const y=top+(bottom-top)*i/4;ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();ctx.fillText(number(max*(1-i/4),max<10?1:0),2,y+4)}
+ ctx.fillText("60s history",left,height-5);ctx.textAlign="right";ctx.fillText("now",right,height-5);
+ ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();let started=false;
+ values.forEach((v,i)=>{if(!Number.isFinite(v)){started=false;return}const x=right-(values.length-1-i)*(right-left)/59,y=bottom-v/max*(bottom-top);if(started)ctx.lineTo(x,y);else ctx.moveTo(x,y);started=true});ctx.stroke();
+ if(!values.some(v=>Number.isFinite(v))){ctx.textAlign="center";ctx.fillText("Waiting for traffic",(left+right)/2,(top+bottom)/2)}
 }
-function animate(t){
- if(t-lastAnimation>32){const reduced=matchMedia("(prefers-reduced-motion: reduce)").matches;$$("canvas[data-topo]").forEach(c=>drawTopology(c,topologyViews.get(c.dataset.topo),reduced?0:t));lastAnimation=t;}
- if(playing&&fullJob){if(playClock){replayTime=Math.min(maxTime(),replayTime+(t-playClock)/1000*speed);if(replayTime>=maxTime())playing=false;updateReplay()}playClock=t}else playClock=0;
- animationId=requestAnimationFrame(animate);
+function renderLive(data,append=true){
+ const m=data.metrics; $("total").textContent=number(m.total);$("rps").textContent=number(m.recent_success_rps_lower_bound);
+ $("latency").textContent=m.p95_ms==null?"—":number(m.p95_ms,1)+" ms";$("errors").textContent=number(m.errors);
+ $("strategy").value=data.strategy;$("active").textContent=number(data.active)+" active · "+number(data.queue)+" queued";
+ const total=data.backends.reduce((sum,b)=>sum+b.total_requests,0);
+ $("backends").innerHTML=data.backends.map(b=>{
+  const status=!b.enabled?"Disabled":b.circuit_state==="OPEN"?"Circuit open":b.status==="HEALTHY"?"Healthy":b.status==="DRAINING"?"Draining":"Unhealthy";
+  const good=status==="Healthy",pct=share(b.total_requests,total);
+  return '<tr><td><strong>'+esc(b.id)+'</strong><small>'+esc(b.host)+':'+esc(b.port)+'</small></td><td><span class="status '+(good?"good":"bad")+'">'+status+'</span></td><td>'+number(b.total_requests)+'</td><td><div class="share"><span style="width:'+pct+'%"></span></div>'+number(pct,0)+'%</td><td>'+number(b.active_connections)+'</td><td>'+(b.successful_requests?number(b.average_latency_ms,1)+" ms":"—")+'</td><td><button class="small-button" data-backend="'+esc(b.id)+'" data-enable="'+(!b.enabled)+'">'+(b.enabled?"Disable":"Enable")+'</button></td></tr>'
+ }).join("")||'<tr><td colspan="7">No backend servers configured.</td></tr>';
+ if(append){history.push({rate:m.recent_success_rps_lower_bound,latency:m.p95_ms});if(history.length>60)history.shift()}
+ chart("rate-chart","rate","#2563eb");chart("latency-chart","latency","#0f766e");
 }
-function chart(series,keys,labels,colors=["#64e8b9","#72b9f3","#f2b66a"]){
- if(!series?.length||!series.some(r=>keys.some(k=>r[k]!=null)))return '<div class="chart-empty">No observations yet. Run a workload to collect data.</div>';
- const all=series.flatMap(r=>keys.map(k=>r[k])).filter(v=>v!=null&&Number.isFinite(v));const max=Math.max(...all,1)*1.1;
- const lo=series[0].time,hi=series.at(-1).time,dx=Math.max(.001,hi-lo);const x=r=>42+((r.time-lo)/dx)*450,y=v=>126-clamp(v/max,0,1)*112;
- const lines=[0,1,2,3].map(i=>{const yy=14+i*112/3;return '<line x1="42" x2="492" y1="'+yy+'" y2="'+yy+'" stroke="var(--line)"/><text x="36" y="'+(yy+3)+'" text-anchor="end" fill="var(--muted)" font-size="9">'+esc(num(max*(1-i/3),1))+'</text>'}).join("");
- const paths=keys.map((k,i)=>{let path="",started=false;for(const r of series){if(r[k]==null){started=false;continue}path+=(started?" L":" M")+x(r).toFixed(2)+" "+y(r[k]).toFixed(2);started=true}return '<path d="'+path+'" stroke="'+colors[i%colors.length]+'" fill="none" stroke-width="2" vector-effect="non-scaling-stroke"/>'}).join("");
- return '<div class="chart"><svg viewBox="0 0 500 145" role="img" aria-label="'+esc(labels.join(", ")+" time series")+'">'+lines+paths+'</svg><div class="chart-labels"><span>'+esc(num(lo,1))+'s</span><span>'+labels.map((l,i)=>'<span style="color:'+colors[i%colors.length]+'">● '+esc(l)+'</span>').join(" &nbsp; ")+'</span><span>'+esc(num(hi,1))+'s</span></div></div>';
+async function refresh(){
+ if(!online||loading)return;loading=true;
+ try{renderLive(await api("console"))}catch(e){notice(e.message)}finally{loading=false}
 }
-function renderHome(){
- const graphic='<svg viewBox="0 0 360 300" aria-hidden="true"><g fill="none" stroke="var(--line)"><circle cx="180" cy="150" r="125"/><circle cx="180" cy="150" r="93"/><circle cx="180" cy="150" r="60"/><path d="M180 15v270M45 150h270M85 55l190 190M275 55L85 245"/></g><g class="orbit" fill="var(--mint)"><circle cx="180" cy="25" r="4"/><circle cx="305" cy="150" r="3"/><circle cx="180" cy="275" r="2"/></g><g class="orbit reverse" stroke="var(--blue)" fill="none"><path d="M180 57a93 93 0 0 1 93 93" stroke-width="2"/><circle cx="180" cy="57" r="4" fill="var(--blue)"/></g><g stroke="var(--mint)" fill="none"><path d="M15 150h58l10-12 11 24 10-12h24" class="hero-wave" stroke-width="2"/><path d="M232 150h24l10-12 11 24 10-12h58" class="hero-wave" stroke-width="2"/><rect x="140" y="110" width="80" height="80" rx="20" fill="var(--panel2)" stroke-width="2"/><path d="M151 154h17l9-22 11 37 9-15h12" stroke-width="3" stroke-linejoin="round"/></g><g fill="var(--muted)" font-family="monospace" font-size="9"><text x="180" y="13" text-anchor="middle">SIGNAL ACQUISITION</text><text x="180" y="296" text-anchor="middle">OBSERVE → ADAPT → VERIFY</text></g></svg>';
- main.innerHTML='<section class="hero"><div><div class="eyebrow">PULSE / ADAPTIVE TRAFFIC ENGINE</div><h1>Traffic is a signal.<br><em>Read it.</em></h1><p>Don’t just distribute traffic. Understand it. Watch routing adapt to congestion, test competing algorithms against identical workloads, and replay every experiment.</p><div class="actions">'+btn("Launch console","go-overview","")+btn("Run first experiment","demo")+'</div><div class="hero-index"><span>01 / OBSERVE</span><span>02 / DISRUPT</span><span>03 / VERIFY</span></div></div><div class="hero-graphic">'+graphic+'</div></section><div class="grid three gap">'+[["01 / PULSE CORE","Adaptive by design","Multi-dimensional routing with feedback, forecasts and safe fallbacks."],["02 / PULSE ARENA","Put algorithms on trial","Identical traces, fault schedules and seeds. No predetermined winner."],["03 / PULSE REPLAY","The traffic time machine","Revisit request outcomes and compare routing at the same simulated instant."]].map(([n,t,p])=>'<section class="panel feature"><div class="eyebrow">'+n+'</div><h2>'+t+'</h2><p>'+p+'</p></section>').join("")+'</div><div class="landing-line"><div><h2>Evidence, not marketing.</h2><p>Every metric in the console is measured locally or explicitly labeled as simulation.</p></div><a class="button secondary" href="https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions" target="_blank" rel="noopener noreferrer">CI evidence ↗</a></div>';
-}
-function liveMetrics(){const m=live?.metrics??{};return metric("Successful throughput",num(m.recent_success_rps_lower_bound,0),"r/s","Last second · bounded sample")+metric("Tail latency",num(m.p99_ms),"ms","p99 · 30s window")+metric("Failure rate",pct(m.error_rate),"","Server errors / transport failures")+metric("Active requests",num(live?.active,0),"","Current proxy in-flight")}
-function nodesMarkup(nodes){return nodes.length?nodes.map(n=>{const utilization=n.capacity?100*n.active/n.capacity:0;const cls=n.down?"bad":utilization>=85||n.status==="RECOVERING"?"warn":"good";return '<button class="node" data-action="inspect" data-id="'+esc(n.id)+'"><div class="node-top"><strong>'+esc(n.id)+'</strong>'+chip(n.status,cls)+'</div>'+meter(utilization,cls==='good'?'':cls)+'<div class="node-meta"><span>'+esc(num(n.active,0))+' / '+esc(num(n.capacity,0))+' active</span><span>'+esc(num(n.rate,0))+' r/s</span></div><div class="node-meta"><span>Policy '+esc(pct(n.probability))+'</span><span>EWMA '+esc(num(n.latency))+' ms</span></div></button>'}).join(""):empty("No live backends","Connect to your engine.")}
-function renderOverview(tall=false){
- main.innerHTML=header(tall?"MONITOR / 02":"MONITOR / 01",tall?"Live topology":"Traffic command center",tall?"Observe actual backend health, request distribution and published policies.":"The operating picture of your Pulse engine. Live measurements remain separate from lab experiments.",btn("New experiment","go-lab",""))+'<div class="grid metrics" id="live-metrics">'+liveMetrics()+'</div><div class="grid two">'+panel("Network fabric","Live · sampled completions and current node state",topologyShell("live",tall))+panel("Backend fleet","Select a node to inspect its signals",'<div class="node-list" id="live-nodes"></div>')+'</div><div class="grid equal gap">'+panel("Throughput","Successful requests / second · sampled",'<div id="live-throughput"></div>')+panel("Latency distribution","p50 / p95 / p99 · rolling client outcomes",'<div id="live-latency"></div>')+'</div><div class="grid equal gap">'+panel("Routing decisions","Sampled explanations; no request payloads",'<div id="live-log"></div>')+panel("Backend inspector","Health, routing weights and congestion forecasts",'<div id="node-inspector"></div>')+'</div>';
- updateLive();
-}
-function logs(){const entries=live?.metrics?.decisions??[];return entries.length?entries.slice(0,8).map(e=>'<div class="log"><time>'+esc(new Date(e.at*1000).toLocaleTimeString())+'</time> · <strong>'+esc(e.backend)+'</strong> · '+esc(e.class)+'<p>'+esc(e.reason)+'</p></div>').join(""):empty("No sampled decisions","Forward traffic through the proxy to populate this feed.")}
-function inspector(){const n=live?.backends?.find(n=>n.id===selectedNode)??live?.backends?.[0];if(!n)return empty("No backend selected");const pred=live.intelligence?.predictions?.[n.id];const p=live.policy?.backends?.[n.id];return '<div class="details"><h3>'+esc(n.id)+'</h3>'+kv("Health",n.status)+kv("Circuit",n.circuit_state)+kv("Configured capacity",n.capacity)+kv("Routing probability",pct(n.probability))+kv("Observed error rate",pct(n.observed_error_rate))+kv("Predicted pressure",num(pred?.forecast,3))+kv("Forecast confidence",pct(pred?.confidence))+kv("Queue",n.queue)+kv("CPU / memory",pct(n.cpu)+" / "+pct(n.memory))+'<div class="callout">'+esc(p?.explanation??"No adaptive policy for this backend.")+'</div></div>'}
-function updateLive(){
- if(!["overview","topology"].includes(page))return;const nodes=liveNodes(live,previousLive);setTopology("live",nodes,live?"LIVE / "+algorithmName(live.strategy):"OFFLINE / connect engine");
- const vals={"#live-metrics":liveMetrics(),"#live-nodes":nodesMarkup(nodes),"#live-throughput":chart(history,["rps"],["Successful RPS"]),"#live-latency":chart(history,["p50","p95","p99"],["p50","p95","p99"]),"#live-log":logs(),"#node-inspector":inspector()};for(const [id,html] of Object.entries(vals)){const el=$(id);if(el)el.innerHTML=html;}
-}
-async function refreshLive(){
- if(!token||liveLoading)return;liveLoading=true;const generation=epoch;
- try{const next=await api("console");if(generation!==epoch)return;previousLive=live;live=next;setConnection("online");
- const m=live.metrics;history.push({time:live.timestamp-(history.length?history[0].origin:live.timestamp),origin:history.length?history[0].origin:live.timestamp,rps:m.recent_success_rps_lower_bound,p50:m.p50_ms,p95:m.p95_ms,p99:m.p99_ms,error:m.error_rate==null?null:m.error_rate*100});if(history.length>90)history.shift();updateLive();
- if(page==="autopilot"||page==="intelligence"||page==="observability"||page==="config")updateIntelligence();
- }catch(e){if(generation===epoch)setConnection("error")}finally{liveLoading=false}
-}
-const patterns={steady:"Steady",burst:"Burst ×4",ramp:"Ramp-up",periodic:"Periodic",mixed:"Mixed request classes",custom:"Custom rate schedule"};
-function syncDraft(){
- const form=$("#experiment-form");if(!form)return;
- const fd=new FormData(form);for(const k of ["seed","rps","duration","warmup","concurrency","repetitions","slo_ms","timeout_ms","shadow_every"])draft[k]=Number(fd.get(k));
- draft.total_requests=fd.get("total_requests")?Number(fd.get("total_requests")):null;draft.mode=fd.get("mode");draft.pattern=fd.get("pattern");draft.objective=fd.get("objective");draft.algorithms=fd.getAll("algorithm");draft.shadow=fd.getAll("shadow");
- if(draft.pattern==="custom"){try{draft.rate_schedule=JSON.parse(fd.get("rate_schedule"))}catch{throw Error("Custom schedule must be valid JSON.")}}else draft.rate_schedule=[];
-}
-function nodeEditor(){return draft.nodes.map((n,i)=>'<div class="config-node" data-node="'+i+'">'+field("Node ID","node-id-"+i,n.id,"text",'required maxlength="32" data-node-field="id"')+field("Capacity","node-cap-"+i,n.capacity,"number",'min="1" max="64" data-node-field="capacity"')+field("Latency ms","node-lat-"+i,n.latency_ms,"number",'min="1" max="2000" data-node-field="latency_ms"')+field("Weight","node-weight-"+i,n.weight,"number",'min="1" max="100" data-node-field="weight"')+btn("Remove","remove-node","danger",'data-index="'+i+'"')+field("Queue limit","node-queue-"+i,n.queue_limit??32,"number",'min="0" max="128" data-node-field="queue_limit"')+field("Error probability","node-error-"+i,n.error_rate??0,"number",'min="0" max="1" step="0.01" data-node-field="error_rate"')+field("Compute multiplier","node-compute-"+i,n.class_multipliers?.compute??1,"number",'min="0.1" max="10" step="0.1" data-node-field="compute"')+field("DB multiplier","node-db-"+i,n.class_multipliers?.database??1,"number",'min="0.1" max="10" step="0.1" data-node-field="database"')+'</div>').join("")}
-const faultTypes={down:"Shutdown",restore:"Restore",latency:"Extra latency (ms)",error:"Error probability",capacity:"Capacity",network:"Network delay (ms)",resource:"Capacity factor"};
-function faultEditor(){return draft.faults.map((f,i)=>'<div class="fault-row" data-fault="'+i+'">'+field("Time (s)","fault-at-"+i,f.at,"number",'min="0" max="120" step="0.1" data-fault-field="at"')+select("Target","fault-backend-"+i,f.backend,Object.fromEntries(draft.nodes.map(n=>[n.id,n.id])))+select("Fault","fault-kind-"+i,f.kind,faultTypes)+field("Value","fault-value-"+i,f.value??0,"number",'min="0" max="2000" step="any" data-fault-field="value"')+btn("Remove","remove-fault","danger",'data-index="'+i+'"')+'</div>').join("")}
-function checks(name,chosen){return '<div class="checks">'+Object.entries(ALGORITHMS).map(([id,label])=>'<label class="check"><input type="checkbox" name="'+name+'" value="'+id+'" '+(chosen.includes(id)?"checked":"")+'> '+esc(label)+'</label>').join("")+'</div>'}
-function renderExperiment(kind){
- const title=kind==="arena"?"Algorithm battle arena":kind==="chaos"?"Chaos studio":"Traffic lab";
- main.innerHTML=header("EXPERIMENT / "+(kind==="lab"?"01":kind==="arena"?"02":"03"),title,kind==="arena"?"Equal workloads. Independent runs. Let the measurements decide.":kind==="chaos"?"Schedule disruptions in isolated lab backends — never the live fleet.":"Generate reproducible traffic against simulated queues or actual local HTTP listeners.",btn("Reset draft","reset-draft"))+'<div class="grid two">'+panel("Experiment configuration","Input parameters · server validates every run",'<form class="pad" id="experiment-form"><div class="form-grid">'+select("Execution mode","mode",draft.mode,{simulation:"Seeded simulation",http:"Measured local HTTP"})+select("Traffic pattern","pattern",draft.pattern,patterns)+field("Requests / second","rps",draft.rps,"number",'required min="1" max="5000"')+field("Duration (seconds)","duration",draft.duration,"number",'required min="0.1" max="120" step="0.1"')+field("Concurrency cap","concurrency",draft.concurrency,"number",'required min="1" max="500"')+field("Request count cap (optional)","total_requests",draft.total_requests??"","number",'min="1" max="20000"')+field("Random seed","seed",draft.seed,"number",'min="0" max="2147483647"')+field("Repetitions","repetitions",draft.repetitions,"number",'min="1" max="5"')+field("Warm-up (seconds)","warmup",draft.warmup,"number",'min="0" max="20" step="0.1"')+field("SLO latency (ms)","slo_ms",draft.slo_ms,"number",'min="1" max="60000"')+field("Timeout (ms)","timeout_ms",draft.timeout_ms,"number",'min="10" max="10000"')+select("Ranking objective","objective",draft.objective,{balanced:"SLO violations",latency:"p99 latency",throughput:"Successful throughput",reliability:"Error rate"})+'<div class="field full" id="custom-rate" '+(draft.pattern==="custom"?"":"hidden")+'><label for="rate_schedule">Rate schedule [[seconds,multiplier],…]</label><textarea id="rate_schedule" name="rate_schedule">'+esc(JSON.stringify(draft.rate_schedule.length?draft.rate_schedule:[[0,1],[2,2]]))+'</textarea></div></div><div class="section-label"><h3>Routing algorithms</h3>'+chip("Same trace")+'</div>'+checks("algorithm",draft.algorithms)+'<div class="section-label"><h3>Backend profiles</h3>'+btn("Add node","add-node")+'</div><div id="node-editor">'+nodeEditor()+'</div><div class="section-label"><h3>Scheduled faults</h3>'+btn("Add fault","add-fault")+'</div><div id="fault-editor">'+faultEditor()+'</div><div class="section-label"><h3>Shadow candidates (simulation)</h3></div>'+checks("shadow",draft.shadow)+field("Shadow sampling interval","shadow_every",draft.shadow_every,"number",'min="1" max="1000"')+'<div class="callout gap" id="mode-note"></div><div class="actions gap"><button type="submit" class="button" id="launch">Launch experiment →</button>'+btn("Burst + failure preset","preset-chaos")+'</div><p class="small gap" id="form-error" role="alert"></p></form>')+panel("Mission control","Execution state and sampled topology",'<div class="pad" id="job-status"></div>'+topologyShell("experiment")+'<div id="experiment-notes" class="pad"></div>')+'</div><div class="stack" id="results"></div>';
- updateMode();updateJob();
-}
-function updateMode(){const note=$("#mode-note");if(!note)return;note.textContent=draft.mode==="http"?"MEASURED HTTP · max 200 rps, 64 concurrent, 20 seconds including warm-up, 4,000 request bound and 8 runs. Faults are synthetic application faults in isolated loopback listeners.":"SIMULATION · seeded arrival/service times and finite queues. Results are modeled, not production throughput. Maximum 80,000 request-run work budget.";$("#custom-rate").hidden=draft.pattern!=="custom"}
-function renderJobStatus(){if(!job)return empty("No experiment running","Configure and launch a workload to begin.");const p=job.progress??{};const state=job.state;const active=!TERMINAL.has(state);return '<div class="job-head"><h2>'+esc(algorithmName(p.algorithm??job.spec?.algorithms?.[0]))+'</h2>'+chip(state,state==="completed"?"good":state==="failed"?"bad":"warn")+'</div><div class="small mono gap">'+esc(job.id.slice(0,12))+' / '+esc(job.spec?.mode==="http"?"MEASURED HTTP":"SIMULATION")+'</div><div class="progress-line"><i style="width:'+runProgress(job)+'%"></i></div><div class="node-meta"><span>'+esc(num(runProgress(job)))+'%</span><span>'+esc(num(p.completed,0))+' / '+esc(num(p.offered,0))+' completed</span></div><div class="actions gap">'+(active?btn("Pause","job-pause","secondary",state!=="running"||job.spec.mode==="http"?"disabled":"")+btn("Resume","job-resume","secondary",state!=="paused"?"disabled":"")+btn("Cancel","job-cancel","danger"):btn("Replay run","job-replay")+btn("JSON","export-json")+btn("CSV","export-csv"))+'</div>'+(job.error?'<div class="callout error gap">'+esc(job.error)+'</div>':"")}
-function resultsTable(runs){return runs.length?'<div class="table-wrap"><table><thead><tr><th>Algorithm</th><th>Seed</th><th>Offered</th><th>Success r/s</th><th>p50</th><th>p95</th><th>p99</th><th>Error</th><th>Dropped</th><th>Timeout</th><th>SLO violation</th><th>Fairness</th><th>CPU (s)</th></tr></thead><tbody>'+runs.map(r=>{const s=r.summary;return '<tr><td><strong>'+esc(algorithmName(r.algorithm))+'</strong></td><td>'+esc(r.seed)+'</td><td>'+esc(num(s.offered,0))+'</td><td>'+esc(num(s.successful_rps))+'</td><td>'+esc(num(s.p50_ms))+' ms</td><td>'+esc(num(s.p95_ms))+' ms</td><td>'+esc(num(s.p99_ms))+' ms</td><td>'+esc(pct(s.error_rate))+'</td><td>'+esc(num(s.dropped,0))+'</td><td>'+esc(num(s.timeouts,0))+'</td><td>'+esc(pct(s.slo_violation_rate))+'</td><td>'+esc(num(s.jain_fairness,3))+'</td><td>'+esc(num(s.process_cpu_seconds,3))+'</td></tr>'}).join("")+'</tbody></table></div>':empty("No completed runs")}
-function rankingMarkup(rank){if(!rank?.length)return empty("No ranking yet");const maximum=Math.max(...rank.map(r=>Math.abs(r.mean)),.0001);return '<div class="pad"><p class="small">Ranked by '+esc(rank[0].metric)+'; '+(rank[0].metric==="successful_rps"?"higher":"lower")+' is better. Approximate intervals, when available, are descriptive.</p>'+rank.map((r,i)=>'<div class="rank-bar"><span class="rank-label">'+(i+1)+'. '+esc(algorithmName(r.algorithm))+'</span>'+meter(Math.abs(r.mean)/maximum*100)+'<span class="number">'+esc(num(r.mean,3))+'</span></div><div class="small mono">'+esc(r.repetitions)+' run(s) · CI95 '+esc(r.ci95?r.ci95.map(v=>num(v,3)).join(" to "):"not available")+'</div>').join("")+'</div>'}
-function cachedSeries(r){if(!seriesCache.has(r))seriesCache.set(r,seriesFromRequests(r));return seriesCache.get(r)}
-function maxTime(){return Math.max(0,...(fullJob?.runs??[]).map(r=>r.timeline?.at(-1)?.time??0))}
-function comparisonRuns(){const runs=fullJob?.runs??[];const seed=replaySeed??runs[0]?.seed;return runs.filter(r=>r.seed===seed)}
-function comparisonMarkup(){const runs=comparisonRuns();if(!runs.length)return empty("No recorded timelines","Complete a run to compare the algorithms side by side.");
- return '<div class="timeline-controls">'+btn("Play","play-toggle")+'<input aria-label="Replay time" id="scrub" type="range" min="0" max="'+maxTime()+'" step="0.05" value="'+replayTime+'"><span class="number" id="replay-time">'+num(replayTime,2)+'s</span><label for="replay-speed">Speed</label><select id="replay-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select><label for="replay-seed">Seed</label><select id="replay-seed">'+[...new Set(fullJob.runs.map(r=>r.seed))].map(s=>'<option '+(s===(replaySeed??runs[0].seed)?"selected":"")+'>'+s+'</option>').join("")+'</select></div><div class="fault-markers">'+(fullJob.spec?.faults??[]).map(f=>'<button class="chip warn" data-action="seek-fault" data-time="'+f.at+'">'+esc(num(f.at))+'s · '+esc(f.backend)+' '+esc(f.kind)+'</button>').join("")+'</div><div class="comparison-grid">'+runs.map((r,i)=>'<section class="panel"><div class="panel-head"><h2>'+esc(algorithmName(r.algorithm))+'</h2>'+chip(r.mode==="http"?"HTTP":"SIM")+'</div><div class="topology mini"><canvas data-topo="compare-'+i+'" role="img" aria-label="'+esc(algorithmName(r.algorithm))+' topology"></canvas></div><div class="topo-caption" id="compare-caption-'+i+'"></div>'+chart(cachedSeries(r),["rps"],["Successful RPS"])+chart(cachedSeries(r),["p95","p99"],["p95 ms","p99 ms"])+'</section>').join("")+'</div>';
-}
-function updateReplay(){if(!$("#scrub"))return;$("#scrub").value=String(replayTime);$("#replay-time").textContent=num(replayTime,2)+"s";const b=$('[data-action="play-toggle"]');if(b)b.textContent=playing?"Pause":"Play";
- comparisonRuns().forEach((r,i)=>{const frame=frameAt(r.timeline,replayTime),prev=frameAt(r.timeline,replayTime-.25);setTopology("compare-"+i,topologyNodes(frame,prev),algorithmName(r.algorithm)+" / "+r.mode.toUpperCase());const caption=$("#compare-caption-"+i);if(caption)caption.textContent=frame?num(frame.completed,0)+" completed · "+num(frame.time,2)+"s":"No frame at this time";});
-}
-function resultExtras(runs){return runs.map(r=>{const s=r.summary;return '<div class="panel pad"><h3>'+esc(algorithmName(r.algorithm))+' · seed '+r.seed+'</h3><div class="grid equal gap"><div>'+kv("Peak simulated queue",num(s.peak_queue,0))+kv("Policy changes",num(s.policy_changes,0))+kv("Elapsed (s)",num(s.elapsed_seconds,3))+'</div><div>'+Object.entries(s.mean_backend_utilization??{}).map(([id,v])=>kv(id+" utilization",pct(v))).join("")+'</div></div>'+Object.entries(s.distribution??{}).map(([id,count])=>'<div class="weight"><span>'+esc(id)+'</span>'+meter(count/Math.max(1,s.offered)*100)+'<span>'+esc(num(count,0))+'</span></div>').join("")+(s.recovery??[]).map(v=>kv(v.backend+" first success after restore",num(v.first_success_seconds,3)+" s")).join("")+Object.entries(r.shadow??{}).map(([id,v])=>'<div class="callout gap">Shadow '+esc(algorithmName(id))+': disagreement '+esc(pct(v.disagreement_rate))+' · estimated latency Δ '+esc(num(v.estimated_latency_delta_ms))+' ms (model estimate)</div>').join("")+'</div>'}).join("")}
-function updateJob(){
- if(!["lab","arena","chaos","replay"].includes(page))return;
- if($("#job-status"))$("#job-status").innerHTML=renderJobStatus();
- if($("#experiment-notes"))$("#experiment-notes").innerHTML='<p class="small">Real HTTP mode runs separately from the live fleet. Packet animation is a sampled representation; zero or unavailable traffic has no moving packets.</p>';
- const f=job?.progress;if(f){const run=fullJob?.runs?.find(r=>r.algorithm===f.algorithm&&r.seed===job.spec.seed+(f.repetition??1)-1);const prev=run?frameAt(run.timeline,f.time-.25):null;setTopology("experiment",topologyNodes(f,prev??lastFrame),"EXPERIMENT / "+algorithmName(f.algorithm));if(!lastFrame||lastFrame.time!==f.time)lastFrame=f;}else setTopology("experiment",[],"STANDBY / no experiment");
- const target=$("#results");if(!target)return;const runs=fullJob?.runs??job?.runs??[];if(target.dataset.resultKey!==(fullJob?.id??"")+":"+runs.length){target.dataset.resultKey=(fullJob?.id??"")+":"+runs.length;target.innerHTML=panel("Performance ledger","Per-run outcomes · warm-up excluded",resultsTable(runs))+panel("Objective ranking","No fixed winner; measured or simulated per selected mode",rankingMarkup(job?.ranking??fullJob?.ranking))+panel("Synchronized comparison","Same seed · timeline playback from recorded frames",comparisonMarkup())+(fullJob?'<div class="grid equal">'+resultExtras(fullJob.runs)+'</div>':"");updateReplay();}
-}
-let lastFrame=null;
-async function loadFull(id){const result=await api("experiments/"+id+"?full=true");if(job?.id!==id)return;fullJob=result;job=result;replaySeed=result.runs?.[0]?.seed??null;replayTime=0;playing=false;updateJob();if(page==="replay")renderReplay()}
-async function refreshJob(id=job?.id){if(!token||!id||jobPolling)return;jobPolling=true;const generation=epoch;try{const next=await api("experiments/"+id);if(generation!==epoch||job?.id!==id)return;job=next;updateJob();if(TERMINAL.has(next.state)&&fullJob?.id!==id){await loadFull(id);await refreshHistory();}}catch(e){if(generation===epoch)toast(e.message,true)}finally{jobPolling=false}}
-async function streamJob(id){
- streamAbort?.abort();const abort=new AbortController();streamAbort=abort;const generation=epoch;
- try{const res=await fetch("/admin/experiments/"+id+"/stream",{headers:{Authorization:"Bearer "+token},signal:abort.signal});if(!res.ok||!res.body)throw Error("Stream unavailable");const reader=res.body.getReader(),decoder=new TextDecoder();let buffer="";
- try{while(true){const {value,done}=await reader.read();if(done)break;if(generation!==epoch||job?.id!==id)break;buffer+=decoder.decode(value,{stream:true});if(buffer.length>2_000_000)throw Error("Stream frame exceeds limit");let end;while((end=buffer.indexOf("\n\n"))>=0){const packet=buffer.slice(0,end);buffer=buffer.slice(end+2);if(!packet.startsWith("data: "))continue;const next=JSON.parse(packet.slice(6));job=next;updateJob();if(TERMINAL.has(next.state)){await loadFull(id);await refreshHistory();return;}}}}finally{await reader.cancel().catch(()=>{})}
- }catch(e){if(!abort.signal.aborted&&generation===epoch){await refreshJob(id)}}
- finally{if(streamAbort===abort)streamAbort=null;}
-}
-async function launch(){
- if(!requireAuth())return;try{syncDraft();validateDraft(draft);const result=await api("experiments",{method:"POST",body:draft});job=result;fullJob=null;lastFrame=null;replayTime=0;playing=false;toast("Experiment accepted · "+job.id.slice(0,8));updateJob();streamJob(job.id);await refreshHistory()}catch(e){const el=$("#form-error");if(el)el.textContent=e.message;toast(e.message,true)}
-}
-async function refreshHistory(){if(!token)return;try{const data=await api("experiments");jobs=data.active??[];saved=data.saved??[];if(page==="replay")updateHistory()}catch{}}
-function updateHistory(){const el=$("#history-list");if(!el)return;const ids=new Set(jobs.map(j=>j.id));const entries=[...jobs,...saved.filter(j=>!ids.has(j.id))];el.innerHTML=entries.length?entries.map(j=>'<button class="node" data-action="load-run" data-id="'+esc(j.id)+'"><div class="node-top"><strong class="mono">'+esc(j.id.slice(0,12))+'</strong>'+chip(j.state??"saved",j.state==="completed"?"good":"")+'</div><div class="node-meta"><span>'+esc(j.spec?.mode??"persisted")+'</span><span>'+esc(j.spec?.pattern??"")+'</span></div></button>').join(""):empty("No recorded experiments","Launch a lab run first.")}
-function renderReplay(){main.innerHTML=header("EXPERIMENT / 04","Traffic time machine","Scrub recorded topology frames, inspect faults, and replay the exact specification.",btn("Refresh history","refresh-history"))+'<div class="grid two">'+panel("Recorded experiments","Active memory and persisted results",'<div class="node-list" id="history-list"></div>')+panel("Selected experiment","Re-run the same seed and workload",'<div class="pad" id="job-status"></div>')+'</div><div class="stack" id="results"></div>';updateHistory();updateJob()}
-function weightMarkup(weights){return Object.entries(weights??{}).map(([k,v])=>'<div class="weight"><span>'+esc(k)+'</span>'+meter(v*100)+'<span>'+esc(pct(v))+'</span></div>').join("")||empty("No policy weights")}
-function renderAutopilot(){main.innerHTML=header("INTELLIGENCE / 01","Routing autopilot","Configure optimization objectives and inspect the controller’s observed policy feedback.")+'<div class="grid equal">'+panel("Optimization controls","Runtime objective and feature flags",'<form class="pad" id="autopilot-form">'+select("Objective","pilot-objective",live?.intelligence?.autopilot?.objective??"balanced",{balanced:"Balanced",latency:"Minimize tail latency",throughput:"Maximize throughput",reliability:"Maximize reliability",custom:"Manual weights"})+'<label class="check gap"><input name="enabled" type="checkbox" '+(live?.intelligence?.autopilot?.enabled?"checked":"")+'> Enable Autopilot</label><label class="check gap"><input name="learning" type="checkbox" '+(live?.intelligence?.autopilot?.learning?"checked":"")+'> Experimental online learning</label><p class="small gap">Learning is opt-in. The target editor below updates runtime safety settings. Changes are not persisted to YAML.</p><button type="submit" class="button gap">Apply objective</button></form>')+panel("Policy weights","Published controller settings",'<div class="pad" id="pilot-weights"></div>')+'</div><div class="grid equal gap">'+panel("SLO targets & observations","Runtime objectives and bounded client observations",'<div class="details" id="pilot-slo"></div><form class="pad" id="targets-form"><div class="form-grid">'+field("p99 target (ms)","target-p99",live?.intelligence?.targets?.p99_seconds*1000||100,"number",'min="1" max="60000" step="any" required')+field("Error target (%)","target-error",(live?.intelligence?.targets?.error_rate??.01)*100,"number",'min="0.0001" max="100" step="any" required')+field("Availability (%)","target-availability",(live?.intelligence?.targets?.availability??.99)*100,"number",'min="0" max="100" step="any" required')+field("Success throughput (r/s)","target-throughput",live?.intelligence?.targets?.success_rps??0,"number",'min="0" max="1000000" step="any" required')+field("Learning exploration (%)","target-explore",(live?.intelligence?.safety?.learning_exploration??.03)*100,"number",'min="0" max="10" step="any" required')+field("Policy cooldown (s)","target-cooldown",live?.intelligence?.safety?.policy_cooldown??10,"number",'min="1" max="300" step="any" required')+field("Weight step (%)","target-step",(live?.intelligence?.safety?.weight_step??.15)*100,"number",'min="0.01" max="25" step="any" required')+field("Rollback loss margin","target-rollback",live?.intelligence?.safety?.rollback_margin??.5,"number",'min="0.001" max="100" step="any" required')+'</div><button type="submit" class="button secondary gap">Update runtime targets</button></form>')+panel("Decision history","Policy changes, cooldown and rollback events",'<div id="pilot-history"></div>')+'</div>';updateIntelligence()}
-function renderIntelligence(){main.innerHTML=header("INTELLIGENCE / 02","Backend intelligence","Observed service fingerprints and congestion forecasts, not speculative capabilities.")+'<div class="stack" id="intel-cards"></div>';updateIntelligence()}
-function renderObservability(){main.innerHTML=header("INTELLIGENCE / 03","Observability","Sampled routing explanations, live shadow comparisons and metrics.",btn("Refresh shadow","refresh-shadow"))+'<div class="grid equal">'+panel("Decision stream","No request contents or credentials",'<div id="obs-log"></div>')+panel("Shadow evaluator","Observational estimates; no duplicate traffic",'<div class="details" id="shadow-data"></div>')+'</div><div class="grid equal gap">'+panel("Client error rate","Rolling 30-second sample window",'<div id="obs-errors"></div>')+panel("Policy snapshot","Current policy version and backend estimates",'<div id="obs-policy"></div>')+'</div>';updateIntelligence();refreshShadow()}
-function renderConfig(){main.innerHTML=header("INTELLIGENCE / 04","Engine configuration","Manage registered backend capacity and weights. Changes affect the live engine.",btn("Refresh","refresh-live"))+'<div class="callout">Live backend changes are administrative operations. This console does not accept arbitrary target URLs. Add or remove network destinations through your trusted deployment configuration.</div><div class="grid equal gap">'+panel("Backend settings","Capacity, weight and enabled status",'<div id="config-backends"></div>')+panel("Manual routing weights","Nonnegative values; normalized by the controller",'<form id="weights-form" class="pad">'+Object.entries(live?.intelligence?.weights??{latency:.35,connections:.25,queue:.15,errors:.20,resources:.05}).map(([k,v])=>field(k,"weight-"+k,v,"number",'min="0" step="any" required')).join("")+'<button type="submit" class="button gap">Publish weights</button></form>')+'</div>';updateIntelligence()}
-function updateIntelligence(){
- const i=live?.intelligence??{};const a=i.autopilot??{};const set=(id,html)=>{const e=$(id);if(e)e.innerHTML=html;};
- set("#pilot-weights",'<div class="small mono">VERSION '+esc(num(i.policy_version,0))+' · '+esc(a.reason??"No policy")+'</div>'+weightMarkup(i.weights));
- set("#pilot-slo",kv("p99 target",num(i.targets?.p99_seconds==null?null:i.targets.p99_seconds*1000)+" ms")+kv("Observed p99",num(i.slo?.samples?i.slo.p99_seconds*1000:null)+" ms")+kv("Error target / observed",pct(i.targets?.error_rate)+" / "+pct(i.slo?.samples?i.slo.error_rate:null))+kv("Availability target / observed",pct(i.targets?.availability)+" / "+pct(i.slo?.samples?i.slo.availability:null))+kv("Throughput target",i.targets?.success_rps?num(i.targets.success_rps)+" r/s":"Disabled")+kv("Samples",num(i.slo?.samples,0)));
- set("#pilot-history",a.history?.length?a.history.slice(-10).reverse().map(e=>'<div class="log"><strong>'+esc(e.reason)+'</strong><p>Loss '+esc(num(e.loss,3))+' · p99 '+esc(num(e.slo?.p99_seconds*1000))+'ms</p></div>').join(""):empty("No policy changes","Enable intelligence and generate traffic."));
- set("#intel-cards",live?.backends?.length?live.backends.map(n=>{const p=i.predictions?.[n.id];const fp=i.fingerprints?.[n.id]??{};return panel(n.id,"Backend performance fingerprint",'<div class="grid equal"><div class="details">'+kv("Predicted pressure",num(p?.forecast,3))+kv("Pressure slope / sec",num(p?.slope_per_second,3))+kv("Risk",pct(p?.risk))+kv("Confidence",pct(p?.confidence))+kv("Latency trend ms/s",num(p?.latency_slope_ms_per_second))+'</div><div class="table-wrap"><table><thead><tr><th>Class</th><th>Samples</th><th>p95 ms</th><th>Errors</th><th>Observed RPS ≥</th></tr></thead><tbody>'+Object.entries(fp).map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+esc(v.samples)+'</td><td>'+esc(num(v.p95_ms))+'</td><td>'+esc(pct(v.error_rate))+'</td><td>'+esc(num(v.success_rps_lower_bound))+'</td></tr>').join("")+'</tbody></table>'+(!Object.keys(fp).length?empty("No class observations"):"")+'</div></div>')}).join(""):empty("No backend telemetry"));
- set("#obs-log",logs());set("#obs-errors",chart(history,["error"],["Error %"],["#f47e86"]));set("#obs-policy",'<div class="details">'+Object.entries(live?.policy?.backends??{}).map(([k,p])=>kv(k,p.explanation)).join("")+'</div>');
- if(page==="config"&&$("#config-backends")&&!$("#config-backends").contains(document.activeElement)){set("#config-backends",live?.backends?.length?live.backends.map((n,index)=>'<form class="pad backend-form" data-id="'+esc(n.id)+'"><h3>'+esc(n.id)+'</h3><div class="form-grid gap">'+field("Capacity","live-cap-"+index,n.capacity,"number",'min="1" max="1000000" required')+field("Weight","live-weight-"+index,n.weight,"number",'min="1" max="10000" required')+'</div><label class="check gap"><input type="checkbox" name="enabled" '+(n.enabled?"checked":"")+'> Enabled</label><button class="button secondary gap" type="submit">Apply backend settings</button></form>').join(""):empty("Connect to manage backends"))}
-}
-async function refreshShadow(){if(!token)return;try{shadow=await api("shadow");const el=$("#shadow-data");if(el)el.innerHTML=kv("Enabled",shadow.enabled?"Yes":"No")+kv("Observed decisions",shadow.observed_decisions)+kv("Dropped samples",shadow.dropped_samples)+Object.entries(shadow.candidates??{}).map(([k,v])=>'<h3>'+esc(algorithmName(k))+'</h3>'+kv("Samples",v.samples)+kv("Disagreement",pct(v.disagreement_rate))+kv("Estimated latency Δ",num(v.estimated_latency_delta_ms)+" ms")).join("")+'<div class="callout">'+esc(shadow.note)+'</div>'}catch(e){toast(e.message,true)}}
-function route(){
- const dest=location.hash.slice(1);if(dest==="main")return;page=pages.some(p=>p[0]===dest)?dest:"home";topologyViews.clear();playing=false;nav();$("#breadcrumb").textContent="Pulse / "+pages.find(p=>p[0]===page)[1];$(".sidebar").classList.remove("open");
- if(page==="home")renderHome();else if(page==="overview"||page==="topology")renderOverview(page==="topology");else if(["lab","arena","chaos"].includes(page))renderExperiment(page);else if(page==="replay"){renderReplay();refreshHistory()}else if(page==="autopilot")renderAutopilot();else if(page==="intelligence")renderIntelligence();else if(page==="observability")renderObservability();else renderConfig();
-}
-const navigate=p=>{if(location.hash==="#"+p)route();else location.hash=p};
-function safeSync(){try{syncDraft();return true}catch(e){toast(e.message,true);return false}}
-function redrawEditors(){if($("#node-editor"))$("#node-editor").innerHTML=nodeEditor();if($("#fault-editor"))$("#fault-editor").innerHTML=faultEditor()}
-async function control(action){if(!job||!requireAuth())return;try{const next=await api("experiments/"+job.id+"/"+action,{method:"POST"});job=next;if(action==="replay"){fullJob=null;lastFrame=null;replayTime=0;playing=false;streamJob(job.id)}updateJob();toast("Experiment "+next.state);await refreshHistory()}catch(e){toast(e.message,true)}}
-async function downloadResult(format){if(!job||!requireAuth())return;try{const res=await fetch("/admin/experiments/"+job.id+"/export?format="+format,{headers:{Authorization:"Bearer "+token}});if(!res.ok)throw Error("Export failed ("+res.status+")");const url=URL.createObjectURL(await res.blob());const a=document.createElement("a");a.href=url;a.download="pulse-"+job.id.slice(0,8)+"."+format;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(e){toast(e.message,true)}}
-main.addEventListener("click",async e=>{
- const b=e.target.closest("[data-action]");if(!b)return;const action=b.dataset.action;
- if(action.startsWith("go-")){navigate(action.slice(3));return}
- if(action==="demo"){draft=defaults();draft.faults=[{at:3,backend:"b1",kind:"down",value:0},{at:5,backend:"b1",kind:"restore",value:0}];navigate("lab");if(!token)requireAuth();return}
- if(action==="inspect"){selectedNode=b.dataset.id;updateLive();return}
- if(action==="reset-draft"){draft=defaults();renderExperiment(page);return}
- if(action==="preset-chaos"){if(!safeSync())return;const t=draft.duration+draft.warmup;draft.pattern="burst";draft.faults=[{at:t*.35,backend:draft.nodes[0].id,kind:"latency",value:180},{at:t*.55,backend:draft.nodes[0].id,kind:"down",value:0},{at:t*.8,backend:draft.nodes[0].id,kind:"restore",value:0}];renderExperiment(page);return}
- if(["add-node","remove-node","add-fault","remove-fault"].includes(action)){if(!safeSync())return;
- if(action==="add-node"){if(draft.nodes.length>=8)return toast("Maximum eight nodes.",true);let i=1;while(draft.nodes.some(n=>n.id==="b"+i))i++;draft.nodes.push({id:"b"+i,capacity:8,latency_ms:20,weight:1,queue_limit:32,error_rate:0})}
- if(action==="remove-node"){if(draft.nodes.length<=1)return toast("Keep at least one node.",true);const [n]=draft.nodes.splice(Number(b.dataset.index),1);draft.faults=draft.faults.filter(f=>f.backend!==n.id)}
- if(action==="add-fault"){if(draft.faults.length>=32)return toast("Maximum 32 faults.",true);draft.faults.push({at:draft.duration/2,backend:draft.nodes[0].id,kind:"down",value:0})}
- if(action==="remove-fault")draft.faults.splice(Number(b.dataset.index),1);redrawEditors();return}
- if(action.startsWith("job-")){await control(action.slice(4));return}
- if(action.startsWith("export-")){await downloadResult(action.slice(7));return}
- if(action==="play-toggle"){if(replayTime>=maxTime())replayTime=0;playing=!playing;updateReplay();return}
- if(action==="seek-fault"){replayTime=Number(b.dataset.time);updateReplay();return}
- if(action==="refresh-history"){await refreshHistory();return}
- if(action==="load-run"){if(!requireAuth())return;try{streamAbort?.abort();job=await api("experiments/"+b.dataset.id);fullJob=null;playing=false;await loadFull(job.id);if(!TERMINAL.has(job.state))streamJob(job.id)}catch(e){toast(e.message,true)}return}
- if(action==="refresh-shadow"){await refreshShadow();return}
- if(action==="refresh-live"){await refreshLive();return}
+document.querySelectorAll("[data-page]").forEach(btn=>btn.addEventListener("click",()=>{
+ const id=btn.dataset.page;for(const page of ["dashboard","arena"])$(page).hidden=id!==page;
+ document.querySelectorAll("[data-page]").forEach(b=>{b.classList.toggle("active",b===btn);if(b===btn)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")});
+ if(id==="dashboard"){chart("rate-chart","rate","#2563eb");chart("latency-chart","latency","#0f766e")}
+}));
+$("auth-button").addEventListener("click",()=>{if(online){token="";trafficStop=true;setConnected(false);return}$("auth-error").textContent="";$("auth-dialog").showModal()});
+$("close-auth").addEventListener("click",()=>$("auth-dialog").close());
+$("auth-form").addEventListener("submit",async e=>{
+ e.preventDefault();token=$("token").value;
+ try{const data=await api("console");history=[];setConnected(true);renderLive(data);$("token").value="";$("auth-dialog").close();notice("")}
+ catch(err){token="";$("auth-error").textContent=err.message}
 });
-main.addEventListener("change",e=>{
- const t=e.target;const node=t.closest("[data-node]"),fault=t.closest("[data-fault]");
- if(node&&t.dataset.nodeField){const n=draft.nodes[Number(node.dataset.node)],k=t.dataset.nodeField;if(k==="id"){const old=n.id;n.id=t.value;draft.faults.forEach(f=>{if(f.backend===old)f.backend=n.id});$("#fault-editor").innerHTML=faultEditor()}else if(["compute","database"].includes(k)){n.class_multipliers={...n.class_multipliers,[k]:Number(t.value)}}else n[k]=Number(t.value);return}
- if(fault){const f=draft.faults[Number(fault.dataset.fault)];if(t.dataset.faultField)f[t.dataset.faultField]=Number(t.value);else if(t.name.startsWith("fault-kind")){f.kind=t.value;f.value=({capacity:4,resource:.5,error:.2,latency:100,network:100})[f.kind]??0;$("#fault-editor").innerHTML=faultEditor()}else if(t.name.startsWith("fault-backend"))f.backend=t.value;return}
- if(t.id==="mode"||t.id==="pattern"){if(!safeSync())return;if(draft.mode==="http"){draft.rps=Math.min(200,draft.rps);draft.concurrency=Math.min(64,draft.concurrency);draft.duration=Math.min(20-draft.warmup,draft.duration);$("#rps").value=draft.rps;$("#concurrency").value=draft.concurrency;$("#duration").value=draft.duration}updateMode()}
- if(t.id==="replay-speed")speed=Number(t.value);
- if(t.id==="replay-seed"){replaySeed=Number(t.value);const el=$("#results");if(el)delete el.dataset.resultKey;updateJob();}
+$("strategy").addEventListener("change",async()=>{const selected=$("strategy").value;try{await api("strategy","PATCH",{strategy:selected});notice("Routing algorithm changed to "+ALGORITHMS[selected]);await refresh()}catch(e){notice(e.message);await refresh()}});
+$("backends").addEventListener("click",async e=>{
+ const b=e.target.closest("[data-backend]");if(!b||!online)return;b.disabled=true;
+ try{await api("backends/"+encodeURIComponent(b.dataset.backend),"PATCH",{enabled:b.dataset.enable==="true"});await refresh()}catch(err){notice(err.message);b.disabled=false}
 });
-main.addEventListener("input",e=>{if(e.target.id==="scrub"){replayTime=Number(e.target.value);playing=false;updateReplay()}});
-main.addEventListener("submit",async e=>{
- e.preventDefault();const form=e.target;
- if(form.id==="experiment-form"){await launch();return}
- if(!requireAuth())return;
- try{const fd=new FormData(form);if(form.id==="autopilot-form"){await api("autopilot",{method:"PATCH",body:{objective:fd.get("pilot-objective"),enabled:fd.has("enabled"),learning:fd.has("learning")}});toast("Autopilot configuration applied")}
- else if(form.id==="targets-form"){const n=k=>Number(fd.get(k));await api("autopilot/targets",{method:"PATCH",body:{p99_target_seconds:n("target-p99")/1000,error_target:n("target-error")/100,availability_target:n("target-availability")/100,throughput_target:n("target-throughput"),learning_exploration:n("target-explore")/100,policy_cooldown:n("target-cooldown"),weight_step:n("target-step")/100,rollback_margin:n("target-rollback")}});toast("Runtime targets updated")}
- else if(form.id==="weights-form"){const body=Object.fromEntries([...fd].map(([k,v])=>[k.slice(7),Number(v)]));await api("routing/weights",{method:"PATCH",body});toast("Routing weights published")}
- else if(form.classList.contains("backend-form")){const id=form.dataset.id;if(!confirm("Apply changes to live backend "+id+"?"))return;const body={capacity:Number([...fd].find(([k])=>k.startsWith("live-cap-"))?.[1]),weight:Number([...fd].find(([k])=>k.startsWith("live-weight-"))?.[1]),enabled:fd.has("enabled")};await api("backends/"+encodeURIComponent(id),{method:"PATCH",body});toast("Backend updated")}
- await refreshLive();
- }catch(e){toast(e.message,true)}
+$("traffic-form").addEventListener("submit",async e=>{
+ e.preventDefault();if(!online||generating)return;
+ const count=Number($("count").value),concurrency=Number($("concurrency").value);
+ if(!Number.isInteger(count)||count<1||count>1000||!Number.isInteger(concurrency)||concurrency<1||concurrency>50)return;
+ generating=true;trafficStop=false;setConnected(online);$("stop-traffic").disabled=false;let sent=0,done=0,ok=0;
+ const report=()=>{$("traffic-status").textContent=done+" / "+count+" completed · "+ok+" successful · "+(done-ok)+" failed"};
+ report();
+ async function worker(){while(!trafficStop&&sent<count){sent++;try{const r=await fetch("/api/test",{cache:"no-store",signal:AbortSignal.timeout(10000)});await r.arrayBuffer();if(r.status<500)ok++}catch{}done++;report()}}
+ try{await Promise.all(Array.from({length:Math.min(count,concurrency)},worker));report();if(trafficStop)$("traffic-status").textContent+=" · stopped"}
+ finally{generating=false;$("stop-traffic").disabled=true;setConnected(online);await refresh()}
 });
-$("#auth-button").onclick=()=>{if(token){epoch++;streamAbort?.abort();token="";live=previousLive=job=fullJob=shadow=null;history=[];jobs=[];saved=[];setConnection("");route()}else{$("#auth-error").textContent="";$("#auth-dialog").showModal()}};
-$("#close-auth").onclick=()=>$("#auth-dialog").close();
-$("#auth-form").onsubmit=async e=>{e.preventDefault();token=$("#token").value;try{const data=await api("console");epoch++;live=data;previousLive=null;history=[];$("#token").value="";$("#auth-dialog").close();setConnection("online");toast("Connected to Pulse");route();await refreshHistory();await refreshLive()}catch(err){token="";setConnection("error");$("#auth-error").textContent=err.message}};
-$("#theme").onclick=()=>{const next=document.documentElement.dataset.theme==="dark"?"light":"dark";document.documentElement.dataset.theme=next;try{localStorage.setItem("pulse-theme",next)}catch{}};
-try{const theme=localStorage.getItem("pulse-theme");if(["dark","light"].includes(theme))document.documentElement.dataset.theme=theme}catch{}
-$("#menu").onclick=()=>$(".sidebar").classList.toggle("open");window.addEventListener("hashchange",route);
-setInterval(()=>{if(document.hidden)return;$("#clock").textContent=new Date().toLocaleTimeString()+" LOCAL";if(token){refreshLive();if(job&&!TERMINAL.has(job.state)&&!streamAbort)refreshJob();}},1200);
-route();animationId=requestAnimationFrame(animate);
+$("stop-traffic").addEventListener("click",()=>{trafficStop=true;$("stop-traffic").disabled=true});
+function bars(id,runs,metric){
+ const max=Math.max(1,...runs.map(r=>r.summary[metric]||0));
+ $(id).innerHTML=runs.map(r=>'<div class="bar-row"><span>'+esc(ALGORITHMS[r.algorithm]||r.algorithm)+'</span><div class="bar-track"><i style="width:'+share(r.summary[metric]||0,max)+'%"></i></div><strong>'+number(r.summary[metric],1)+'</strong></div>').join("");
+}
+function renderJob(job){
+ $("job-status").textContent=job.state+(job.progress?.algorithm&&!terminal.has(job.state)?" · "+(ALGORITHMS[job.progress.algorithm]||job.progress.algorithm):"")+(job.error?" · "+job.error:"");
+ $("result-note").textContent=job.spec.mode==="http"?"Measured local HTTP · one run per algorithm":"Modeled simulation · one run per algorithm";
+ $("results").innerHTML=job.runs.map(r=>{const m=r.summary;return '<tr><td><strong>'+esc(ALGORITHMS[r.algorithm]||r.algorithm)+'</strong></td><td>'+number(m.offered)+'</td><td>'+number(m.successful_rps,1)+'</td><td>'+number(m.p95_ms,1)+'</td><td>'+number(m.p99_ms,1)+'</td><td>'+number(m.errors)+'</td></tr>'}).join("")||'<tr><td colspan="6">Waiting for results.</td></tr>';
+ bars("throughput-bars",job.runs,"successful_rps");bars("latency-bars",job.runs,"p95_ms");
+}
+$("arena-form").addEventListener("submit",async e=>{
+ e.preventDefault();if(!online||jobBusy)return;jobBusy=true;setConnected(online);
+ try{const spec=arenaSpec($("mode").value,Number($("arena-rps").value),Number($("duration").value),$("pattern").value);const job=await api("experiments","POST",spec);jobId=job.id;renderJob(job)}
+ catch(err){notice(err.message);jobBusy=false;setConnected(online)}
+});
+$("cancel-arena").addEventListener("click",async()=>{if(!jobId)return;try{renderJob(await api("experiments/"+jobId+"/cancel","POST"))}catch(e){notice(e.message)}});
+let pollingJob=false;
+async function pollJob(){if(!online||!jobBusy||!jobId||pollingJob)return;pollingJob=true;try{const job=await api("experiments/"+jobId);renderJob(job);if(terminal.has(job.state)){jobBusy=false;setConnected(online)}}catch(e){notice(e.message)}finally{pollingJob=false}}
+setInterval(()=>{refresh();pollJob()},1000);
+window.addEventListener("resize",()=>{chart("rate-chart","rate","#2563eb");chart("latency-chart","latency","#0f766e")});
