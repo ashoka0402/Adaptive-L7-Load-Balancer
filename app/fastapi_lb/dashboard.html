@@ -138,6 +138,69 @@
   body.light .port:hover { background:#dce3d9; } body.light .run { color:white; }
   @media(max-width:1100px) { .readouts { grid-template-columns:repeat(3,1fr); } html,body { height:auto; overflow:auto; } .app { height:auto; min-height:100vh; } .stage { min-height:700px; } }
   @media(max-width:880px) { .readouts { grid-template-columns:repeat(2,1fr); } .stage { min-height:0; } .graphwrap { min-height:320px; } }
+
+  /* Flow layout: the document, never a fixed-height viewport, owns scrolling. */
+  html { height:auto; min-height:100%; overflow-y:scroll; }
+  body { height:auto; min-height:100vh; overflow:visible; }
+  .app { height:auto; min-height:100vh; max-width:1680px; margin:auto; animation:none; }
+  .bar { gap:14px; padding:20px 24px; }
+  .field { min-width:0; } select { max-width:100%; }
+  .readouts { grid-template-columns:repeat(6,minmax(0,1fr)); }
+  .ro { min-width:0; padding:18px 20px; }
+  .ro .rv { font-size:clamp(23px,2.5vw,36px); overflow-wrap:anywhere; }
+  .lab { line-height:1.4; letter-spacing:.14em; }
+  .stage { flex:none; display:grid; grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); gap:16px; padding:20px 24px 0; align-items:start; }
+  .bay { min-width:0; border:1px solid var(--line); border-radius:10px; background:var(--panel); overflow:hidden; }
+  .graphwrap { flex:none; height:var(--graph-height,410px); min-height:0; }
+  canvas#graph { display:block; width:100%; height:100%; }
+  .armed { padding:0 12px 12px; font-size:9px; text-align:center; }
+  .rail { display:block; padding:0; overflow:visible; min-width:0; }
+  .panel { min-width:0; border-radius:10px; }
+  .ph { align-items:center; gap:10px; flex-wrap:wrap; }
+  .ph .t { letter-spacing:.12em; }
+  .pname,.pmeta,.pstate,.pbar { display:block; }
+  .port { grid-template-columns:auto minmax(0,1fr) auto; gap:10px; padding:10px 12px; }
+  .pname,.pmeta { overflow-wrap:anywhere; }
+  .port .pbar { width:64px; }
+  .port:disabled { cursor:default; }
+  .charts { padding:24px 24px 0; }
+  .section-head { display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .section-head h2 { font:500 22px Georgia,serif; margin:0; }
+  .section-head span { color:var(--muted); font-size:11px; }
+  .chart-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+  .scopebar { display:block; min-width:0; padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+  .chart-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:10px; }
+  .chart-value { color:var(--cream); font-size:15px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .scopebar canvas, canvas#scope { display:block; width:100%; height:164px; }
+  .lower { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; padding:20px 24px 28px; align-items:start; }
+  .console { flex:none; min-height:160px; }
+  .feed { max-height:300px; min-height:110px; }
+  .feed .m { overflow-wrap:anywhere; }
+  .arena-result { overflow-x:auto; }
+  .secondary:focus-visible,button:focus-visible { outline:2px solid var(--brass); outline-offset:2px; }
+  .muted-note { color:var(--muted); font-size:10px; }
+  @media(max-width:1150px) {
+    .readouts { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .stage { grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); }
+  }
+  @media(max-width:900px) {
+    .stage,.lower { grid-template-columns:minmax(0,1fr); }
+    .chart-grid { grid-template-columns:minmax(0,1fr); }
+    .scopebar canvas, canvas#scope { height:180px; }
+    .bar .grow { display:none; }
+    .bar .brand { width:100%; }
+  }
+  @media(max-width:520px) {
+    .bar { padding:16px; gap:10px; }
+    .bar .status { width:100%; }
+    .bar .field { flex:1; }
+    #strategy { width:100%; }
+    .readouts { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .ro { padding:14px 16px; }
+    .stage,.charts,.lower { padding-left:12px; padding-right:12px; }
+    .scopebar { padding:12px; }
+    .graphwrap { height:var(--graph-height,380px); }
+  }
 </style>
 </head>
 <body>
@@ -174,23 +237,33 @@
 
   <main class="stage">
     <div class="bay">
-      <div class="graphwrap">
-        <canvas id="graph"></canvas>
+      <div class="ph"><span class="t">Live traffic topology</span><span class="muted-note">Aggregate traffic flow</span></div><div class="graphwrap">
+        <canvas id="graph" role="img" aria-label="Live load balancer topology; backend controls are also available in the backend list"></canvas>
         <div class="armed" id="armed">press run to send traffic through the router</div>
       </div>
-      <div class="scopebar"><span class="lab">throughput</span><canvas id="scope"></canvas></div><div class="scopebar"><span class="lab">p95 latency</span><canvas id="latencyScope"></canvas></div><div class="scopebar"><span class="lab">error rate</span><canvas id="errorScope"></canvas></div>
+      
     </div>
     <aside class="rail">
       <div class="panel ports">
         <div class="ph"><span class="t">Backend ports</span><button class="secondary" id="add" type="button">+ Server</button></div>
         <div class="list" id="ports"></div>
       </div>
+    </aside>
+  </main>
+  <section class="charts" aria-label="Live metrics">
+    <div class="section-head"><h2>Live metrics</h2><span>Rolling history · up to 60 seconds</span></div>
+    <div class="chart-grid">
+      <article class="scopebar"><div class="chart-head"><span class="lab">Throughput</span><span class="chart-value" id="scopeValue">0 req/s</span></div><canvas id="scope" role="img" aria-label="Throughput history in requests per second"></canvas></article>
+      <article class="scopebar"><div class="chart-head"><span class="lab">p95 latency</span><span class="chart-value" id="latencyValue">0 ms</span></div><canvas id="latencyScope" role="img" aria-label="95th percentile latency history in milliseconds"></canvas></article>
+      <article class="scopebar"><div class="chart-head"><span class="lab">Error rate</span><span class="chart-value" id="errorValue">0%</span></div><canvas id="errorScope" role="img" aria-label="Error rate history in percent"></canvas></article>
+    </div>
+  </section>
+  <section class="lower" aria-label="Experiments and activity">
       <div class="panel"><div class="ph"><span class="t">Battle arena</span><button class="secondary" id="arena" type="button">Compare</button></div><div id="arenaResult" class="arena-result">Same request count and worker count for each algorithm.</div></div><div class="panel console">
         <div class="ph"><span class="t">Activity</span></div>
         <div class="feed" id="feed"><div class="empty">awaiting traffic…</div></div>
       </div>
-    </aside>
-  </main>
+  </section>
 </div>
 
 <script>
@@ -234,7 +307,7 @@
     $('total').textContent = s.totals.total.toLocaleString();
 
     $('ports').innerHTML = s.backends.map((b) =>
-      `<button type="button" class="port ${b.dead ? 'dead' : ''}" onclick="toggle('${b.id}')" aria-label="${b.label}, ${stateText(b)}. Click to ${b.dead ? 'restore' : 'take offline'}.">
+      `<button type="button" class="port ${b.dead ? 'dead' : ''}" onclick="toggle('${b.id}')" ${(!s.demo || s.arenaRunning) ? 'disabled' : ''} aria-label="${b.label}, ${stateText(b)}. Click to ${b.dead ? 'restore' : 'take offline'}.">
         <span class="dot ${dotClass(b)}"></span>
         <span><span class="pname">${b.label}</span><span class="pmeta">${b.active} in-flight · ${b.latency} ms</span></span>
         <span class="pright"><span class="pshare">${b.share}<s>%</s></span><span class="pbar"><i style="width:${b.share}%"></i></span><span class="pstate">${stateText(b)}</span></span>
@@ -247,7 +320,9 @@
         ).join('')
       : '<div class="empty">awaiting traffic…</div>';
 
-    drawScope(s.series.rps); drawScope(s.series.p95, 'latencyScope', C.ok); drawScope(s.series.errors, 'errorScope', C.down);
+    const graphHeight = Math.max(380, (s.backends.length + 1) * 57);
+    $('graph').parentElement.style.setProperty('--graph-height', graphHeight + 'px');
+    drawCharts(s);
     $('run').disabled = s.arenaRunning || !s.demo; $('strategy').disabled = s.arenaRunning; $('workers').disabled = s.running || s.arenaRunning; $('add').disabled = s.arenaRunning || !s.demo || s.backends.length >= 6; $('arena').disabled = !s.demo || s.running || s.arenaRunning;
     if (s.arenaRunning) $('arenaResult').textContent = 'Running real HTTP comparison…';
     else if (s.arena && s.arena.length) $('arenaResult').innerHTML = '<table><thead><tr><th>Algorithm</th><th>req/s</th><th>p95 ms</th><th>OK %</th></tr></thead><tbody>' + s.arena.map(r => '<tr><td>'+r.strategy+'</td><td>'+r.rps+'</td><td>'+r.p95+'</td><td>'+r.successPct+'</td></tr>').join('') + '</tbody></table>';
@@ -261,17 +336,46 @@
     const x = c.getContext('2d'); x.setTransform(dpr, 0, 0, dpr, 0, 0);
     return { x, w, h: hh };
   }
-  function drawScope(data, id = 'scope', color = C.brass) {
-    const c = $(id); const { x, w, h } = fit(c);
-    x.clearRect(0, 0, w, h);
-    if (!data || !data.length) return;
-    let max = 1; for (const v of data) if (v > max) max = v; max *= 1.25;
-    const step = w / Math.max(1, data.length - 1);
-    x.beginPath();
-    data.forEach((v, i) => { const px = i * step, py = h - (v / max) * (h - 3) - 2; i ? x.lineTo(px, py) : x.moveTo(px, py); });
-    x.strokeStyle = color; x.lineWidth = 1.5; x.lineJoin = 'round'; x.stroke();
-    x.lineTo((data.length - 1) * step, h); x.lineTo(0, h); x.closePath();
-    x.fillStyle = 'rgba(201,162,75,.10)'; x.fill();
+  function drawCharts(s) {
+    const specs = [
+      ['scope','scopeValue',s.series.rps,C.brass,' req/s',null],
+      ['latencyScope','latencyValue',s.series.p95,C.ok,' ms',null],
+      ['errorScope','errorValue',s.series.errors,C.down,'%',100],
+    ];
+    for (const [id,valueId,data,color,unit,fixedMax] of specs) {
+      $(valueId).textContent = (data.at(-1) ?? 0) + unit;
+      drawScope(data,id,color,unit,fixedMax);
+    }
+  }
+  function drawScope(data,id,color,unit,fixedMax) {
+    const {x,w,h} = fit($(id));
+    if (w < 100 || h < 80) return;
+    x.clearRect(0,0,w,h);
+    const top=12, bottom=h-26, left=47, right=w-9;
+    const max=fixedMax ?? Math.max(1, Math.ceil(Math.max(0,...data)*1.15));
+    const y=v=>bottom-(Math.max(0,Math.min(max,v))/max)*(bottom-top);
+    x.font='10px ui-monospace,monospace'; x.textAlign='right';
+    for(let i=0;i<=4;i++){
+      const val=max*i/4, yy=y(val);
+      x.strokeStyle=C.line; x.lineWidth=1;
+      x.beginPath(); x.moveTo(left,yy); x.lineTo(right,yy); x.stroke();
+      x.fillStyle=C.mut; x.fillText(Number(val.toFixed(1)).toLocaleString(),left-6,yy+3);
+    }
+    x.textAlign='left'; x.fillStyle=C.mut;
+    x.fillText(data.length > 1 ? '-'+Math.round((data.length-1)*.5)+'s' : 'start',left,h-7);
+    x.textAlign='right'; x.fillText('now',right,h-7);
+    if(!data.length){
+      x.textAlign='center'; x.fillText('Waiting for samples',(left+right)/2,(top+bottom)/2);
+      return;
+    }
+    const pos=i=>data.length===1?right:left+(right-left)*i/(data.length-1);
+    x.beginPath(); data.forEach((v,i)=>i?x.lineTo(pos(i),y(v)):x.moveTo(pos(i),y(v)));
+    x.strokeStyle=color; x.lineWidth=2; x.lineJoin='round'; x.stroke();
+    if(data.length>1){
+      x.lineTo(right,bottom); x.lineTo(left,bottom); x.closePath();
+      x.globalAlpha=.10; x.fillStyle=color; x.fill(); x.globalAlpha=1;
+    }
+    x.beginPath(); x.arc(right,y(data.at(-1)),3,0,Math.PI*2); x.fillStyle=color; x.fill();
   }
 
   // ---------- routing schematic (matte, no glow) ----------
@@ -308,27 +412,30 @@
 
     const s = latest, backs = s ? s.backends : [];
     const n = Math.max(1, backs.length);
-    const ingress = { x: 56, y: h / 2 };
-    const lb = { x: w * 0.40, y: h / 2, w: 156, h: 88 };
+    const compact = w < 520;
+    const ingress = { x: compact ? 24 : 48, y: h / 2 };
+    const lb = { x: w * (compact ? .31 : .39), y: h / 2, w: compact ? 108 : 156, h: 88 };
     const lbRight = lb.x + lb.w / 2;
-    const portX = Math.max(170, w - 138), slot = h / (n + 1);
+    const bw = compact ? 102 : 126;
+    const portX = w - bw - 12, slot = h / (n + 1);
     portRects = [];
     const pts = backs.map((b, i) => ({ b, x: portX, y: slot * (i + 1) }));
     const live = s && s.rps > 0;
 
     // ingress -> LB
     x.lineCap = 'round';
-    x.strokeStyle = live ? 'rgba(201,162,75,.6)' : 'rgba(236,230,216,.12)';
+    x.strokeStyle = live ? C.brass : C.line;
     x.lineWidth = live ? 2 : 1.25;
     x.beginPath(); x.moveTo(ingress.x + 10, ingress.y); x.lineTo(lb.x - lb.w/2, lb.y); x.stroke();
 
     // LB -> ports
     for (const p of pts) {
-      const c1 = { x: lbRight + 80, y: lb.y }, c2 = { x: p.x - 80, y: p.y };
+      const bend = Math.max(8,(p.x-lbRight)*.55);
+      const c1 = { x: lbRight + bend, y: lb.y }, c2 = { x: p.x - bend, y: p.y };
       const dead = p.b.dead || !p.b.alive || p.b.breaker === 'open';
       const share = p.b.share || 0;
       x.setLineDash([]);
-      x.strokeStyle = 'rgba(236,230,216,.07)'; x.lineWidth = 1;
+      x.strokeStyle = C.line; x.lineWidth = 1;
       x.beginPath(); x.moveTo(lbRight, lb.y); x.bezierCurveTo(c1.x,c1.y,c2.x,c2.y,p.x,p.y); x.stroke();
       if (dead) {
         x.strokeStyle = 'rgba(200,112,94,.55)'; x.lineWidth = 1.25; x.setLineDash([2,7]);
@@ -354,7 +461,7 @@
         pos = { x: ingress.x + 10 + (lb.x - lb.w/2 - ingress.x - 10) * p.t, y: lb.y };
         if (p.t >= 1) { const tg = pickPort(backs); if (!tg) { pulses.splice(i,1); continue; } p.leg = 'out'; p.t = 0; p.port = pts.find((q) => q.b.id === tg.id); continue; }
       } else {
-        const pp = p.port; if (!pp || pp.b.dead) { pulses.splice(i,1); continue; }
+        const pp = pts.find(q=>q.b.id===p.port?.b.id); if (!pp || pp.b.dead || !pp.b.alive) { pulses.splice(i,1); continue; }
         pos = bez(p.t, { x: lbRight, y: lb.y }, pp._c1, pp._c2, { x: pp.x, y: pp.y });
         if (p.t >= 1) pulses.splice(i,1);
       }
@@ -380,21 +487,21 @@
     x.strokeStyle = 'rgba(236,230,216,.1)'; x.lineWidth = 1;
     x.beginPath(); x.moveTo(lbx + 18, lb.y + 24); x.lineTo(lbx + lb.w - 18, lb.y + 24); x.stroke();
     x.fillStyle = C.brass; x.font = '500 10px "IBM Plex Mono", monospace';
-    x.fillText((STRAT_LABEL[s && s.strategy] || (s && s.strategy) || '').toUpperCase(), lb.x, lb.y + 37);
+    x.fillText((STRAT_LABEL[s && s.strategy] || (s && s.strategy) || '').toUpperCase(), lb.x, lb.y + 37, lb.w-12);
 
     // port nodes
     for (const p of pts) {
       const b = p.b, dead = b.dead || !b.alive || b.breaker === 'open';
       const col = dead ? C.down : b.breaker === 'half_open' ? C.brass : C.ok;
-      const bw = 126, bh = 46, bx = p.x, by = p.y - bh/2;
+      const bh = 46, bx = p.x, by = p.y - bh/2;
       portRects.push({ id: b.id, x: bx, y: by, w: bw, h: bh });
       x.globalAlpha = dead ? 0.5 : 1;
       node(x, bx, by, bw, bh, 5, 'rgba(236,230,216,.14)');
       x.fillStyle = col; x.beginPath(); x.arc(bx + 17, p.y, 4, 0, 7); x.fill();
       x.textAlign = 'left'; x.fillStyle = C.cream; x.font = '500 13px "Fraunces", serif';
-      x.fillText(b.id, bx + 30, p.y - 2);
+      x.fillText(b.id, bx + 26, p.y - 2,bw-30);
       x.fillStyle = C.mut2; x.font = '500 9px "IBM Plex Mono", monospace';
-      x.fillText(b.latency + 'ms · ' + b.share + '%', bx + 30, p.y + 12);
+      x.fillText(b.latency + 'ms · ' + b.share + '%', bx + 26, p.y + 12,bw-30);
       x.globalAlpha = 1;
     }
 
@@ -419,7 +526,7 @@
   }
   $('run').onclick = () => post('/api/test/' + (running ? 'stop' : 'start'), {workers:Number($('workers').value)});
   $('strategy').onchange = e => post('/api/strategy', {strategy:e.target.value});
-  window.toggle = id => post('/api/backend/' + encodeURIComponent(id) + '/toggle');
+  window.toggle = id => { if(latest?.demo && !latest.arenaRunning) return post('/api/backend/' + encodeURIComponent(id) + '/toggle'); };
   $('add').onclick = () => post('/api/backend/add');
   $('arena').onclick = () => post('/api/arena', {workers:Number($('workers').value)});
   function applyTheme(light) {
@@ -427,6 +534,7 @@
     const s = getComputedStyle(document.body);
     for(const [k,v] of Object.entries({brass:'--brass',cream:'--cream',mut:'--muted',mut2:'--muted2',ok:'--ok',down:'--down',line:'--line'})) C[k]=s.getPropertyValue(v).trim();
     $('theme').textContent=light?'Dark mode':'Light mode';
+    if(latest) drawCharts(latest);
   }
   $('theme').onclick=()=>{const light=!document.body.classList.contains('light');applyTheme(light);try{localStorage.setItem('pulse-theme',light?'light':'dark')}catch{}};
   try{applyTheme(localStorage.getItem('pulse-theme')==='light')}catch{applyTheme(false)}
@@ -436,7 +544,9 @@
   es.onmessage = (e) => { try { latest = JSON.parse(e.data); renderDOM(latest); } catch {} };
   es.onerror = () => { $('statusText').textContent = 'reconnecting…'; };
   requestAnimationFrame(frame);
-  window.addEventListener('resize', () => latest && drawScope(latest.series.rps));
+  const chartResize = new ResizeObserver(() => {if(latest) drawCharts(latest);});
+  for (const id of ['scope','latencyScope','errorScope']) chartResize.observe($(id));
+  window.addEventListener('resize', () => latest && drawCharts(latest));
 </script>
 </body>
 </html>
