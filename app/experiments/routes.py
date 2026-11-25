@@ -21,7 +21,7 @@ SHADOW_KEY = web.AppKey("live_shadow", LiveShadow)
 
 def authorize(request: web.Request) -> None:
     token = request.app[CONFIG_KEY].server.admin_token
-    if not hmac.compare_digest(request.headers.get("Authorization",""),f"Bearer {token}"):
+    if not hmac.compare_digest(request.headers.get("Authorization","").encode(),f"Bearer {token}".encode()):
         raise web.HTTPUnauthorized()
 
 

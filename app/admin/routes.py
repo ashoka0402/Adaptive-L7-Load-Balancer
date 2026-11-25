@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from aiohttp import web
 
 from app.app_keys import CONFIG_KEY, CONTROLLER_KEY, REGISTRY_KEY, TELEMETRY_KEY
+from app.config import BackendConfig
 from app.models.backend import Backend, BackendStatus
 
 if TYPE_CHECKING:
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 def _auth(request: web.Request, token: str) -> web.Response | None:
     auth = request.headers.get("Authorization", "")
-    if not hmac.compare_digest(auth, f"Bearer {token}"):
+    if not hmac.compare_digest(auth.encode(), f"Bearer {token}".encode()):
         return web.json_response({"error": "unauthorized"}, status=401)
     return None
 
@@ -68,7 +69,13 @@ async def add_backend(request: web.Request) -> web.Response:
     if registry.get(bid):
         return web.json_response({"error": "backend exists"}, status=409)
 
-    backend = Backend(id=bid, host=host, port=port, weight=weight, capacity=capacity)
+    try:
+        validated = BackendConfig(id=bid, host=host, port=port, weight=weight, capacity=capacity)
+    except ValueError:
+        return web.json_response({"error": "invalid backend configuration"}, status=400)
+    if not cfg.destination_allowed(validated.host, validated.port):
+        return web.json_response({"error": "destination not in deployment allowlist"}, status=403)
+    backend = Backend(**validated.model_dump())
     registry.add(backend)
     controller: AdaptiveController = request.app[CONTROLLER_KEY]
     controller.publish()
@@ -103,7 +110,7 @@ async def update_backend(request: web.Request) -> web.Response:
     if not isinstance(enabled, bool):
         return web.json_response({"error": "enabled must be boolean"}, status=400)
     status = body.get("status")
-    if status not in {None, "DRAINING", "HEALTHY"}:
+    if status is not None and (not isinstance(status, str) or status not in {"DRAINING", "HEALTHY"}):
         return web.json_response({"error": "invalid status"}, status=400)
 
     backend.weight = weight
@@ -157,7 +164,7 @@ async def update_routing_weights(request: web.Request) -> web.Response:
             raise TypeError("json object required")
         weights = {key: float(value) for key, value in body.items()}
         controller.update_weights(weights)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         return web.json_response({"error": str(exc)}, status=400)
     return web.json_response(controller.snapshot.to_dict())
 
@@ -187,7 +194,7 @@ async def update_backend_telemetry(request: web.Request) -> web.Response:
             cpu=float(body["cpu"]) if "cpu" in body else None,
             memory=float(body["memory"]) if "memory" in body else None,
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return web.json_response({"error": "invalid telemetry"}, status=400)
     return web.json_response({"updated": backend_id})
 
@@ -215,7 +222,7 @@ async def configure_autopilot(request: web.Request) -> web.Response:
         if not isinstance(enabled, bool) or not isinstance(learning, bool) or not isinstance(objective, str):
             raise TypeError("invalid autopilot configuration")
         controller.configure_autopilot(objective, enabled, learning)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return web.json_response({"error": "invalid autopilot configuration"}, status=400)
     return web.json_response(controller.intelligence_status())
 
@@ -232,7 +239,7 @@ async def configure_targets(request: web.Request) -> web.Response:
         if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in body.values()):
             raise TypeError("numeric target fields required")
         controller.configure_targets({key: float(value) for key, value in body.items()})
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return web.json_response({"error": "invalid SLO or safety target"}, status=400)
     return web.json_response(controller.intelligence_status())
 

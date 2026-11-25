@@ -135,7 +135,9 @@ class LoadBalancerApp:
         setup_console(self.app, self.console, self.backpressure)
         self.app.router.add_route("*", "/{path:.*}", self.proxy.handle)
 
-        self.runner = web.AppRunner(self.app, access_log=None)
+        self.runner = web.AppRunner(self.app, access_log=None, handler_cancellation=True,
+                                    auto_decompress=False, max_field_size=self.config.request.max_header_size,
+                                    max_line_size=self.config.request.max_header_size)
         await self.runner.setup()
         self.site = web.TCPSite(
             self.runner,
@@ -164,6 +166,8 @@ class LoadBalancerApp:
 
     async def stop(self) -> None:
         logger.info("graceful shutdown initiated")
+        if self.site:
+            await self.site.stop()
         await self.experiments.stop()
         await self.shadow.stop()
         self._shutdown.set()
@@ -176,8 +180,6 @@ class LoadBalancerApp:
         if self.health_checker:
             await self.health_checker.stop()
         await self.controller.stop()
-        if self.site:
-            await self.site.stop()
         if self.runner:
             await self.runner.cleanup()
         await self.pool.stop()

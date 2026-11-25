@@ -6,6 +6,8 @@ import json
 import sqlite3
 import time
 import uuid
+from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -90,5 +92,11 @@ class SQLiteStore:
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.path, timeout=2.0)
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        connection = sqlite3.connect(self.path, timeout=2.0)
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()

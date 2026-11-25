@@ -75,6 +75,7 @@ class ActiveHealthChecker:
             async with self.session.get(
                 url,
                 timeout=aiohttp.ClientTimeout(total=self.config.timeout),
+                allow_redirects=False,
             ) as resp:
                 latency = time.monotonic() - start
                 backend.last_health_check = time.time()

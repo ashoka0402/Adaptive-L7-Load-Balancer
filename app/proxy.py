@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 from aiohttp import web
+from yarl import URL
 
 from app.metrics import prometheus as metrics
 from app.models.request import RequestContext
@@ -73,6 +74,11 @@ class ReverseProxy:
         self.console = console if console is not None else ConsoleTelemetry()
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
+        # Unknown admin/console paths must never fall through to an upstream.
+        if request.path == "/admin" or request.path.startswith(("/admin/", "/pulse/")) or request.path == "/pulse":
+            return web.json_response({"error": "not found"}, status=404)
+        if request.method == "CONNECT" or request.headers.get("Upgrade"):
+            return web.json_response({"error": "protocol upgrade not supported"}, status=501)
         # Metrics path short-circuit
         if self.config.metrics.enabled and request.path == self.config.metrics.path:
             body, ctype = metrics.metrics_response()
@@ -83,7 +89,14 @@ class ReverseProxy:
 
         # Backpressure
         started = time.monotonic()
-        if not await self.backpressure.acquire():
+        try:
+            admitted = await self.backpressure.acquire()
+        except asyncio.CancelledError:
+            self.console.record(time.monotonic() - started, False)
+            if isinstance(self.strategy, AdaptiveStrategy):
+                self.strategy.controller.intelligence.observe_client(time.monotonic() - started, False)
+            raise
+        if not admitted:
             metrics.REJECTED.inc()
             metrics.QUEUE_SIZE.set(self.backpressure.queue_size)
             if isinstance(self.strategy, AdaptiveStrategy):
@@ -257,11 +270,12 @@ class ReverseProxy:
         body: bytes,
     ) -> web.StreamResponse:
         session = await self.pool.acquire(backend.id)
-        url = f"http://{backend.host}:{backend.port}{ctx.path}"
-        if ctx.query_string:
-            url = f"{url}?{ctx.query_string}"
+        url = URL(f"http://{backend.host}:{backend.port}{request.rel_url.raw_path_qs}", encoded=True)
 
         headers = self._filter_headers(ctx.headers, ctx.hop_headers)
+        # Never forward the control-plane credential, even on an ordinary proxy path.
+        if headers.get("authorization") == f"Bearer {self.config.server.admin_token}":
+            headers.pop("authorization", None)
         headers["x-request-id"] = ctx.request_id
         headers["x-forwarded-for"] = request.remote or "unknown"
         headers["x-forwarded-proto"] = request.scheme
@@ -314,7 +328,7 @@ class ReverseProxy:
             kl = k.lower()
             if kl in HOP_BY_HOP or kl in connection_tokens:
                 continue
-            if kl == "host":
+            if kl in {"host", "forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto"}:
                 continue
             out[k] = v
         return out
@@ -334,7 +348,6 @@ class ReverseProxy:
             extra={
                 "request_id": ctx.request_id,
                 "method": ctx.method,
-                "path": ctx.path,
                 "backend": ctx.backend_id,
                 "status_code": status,
                 "latency_ms": round(latency * 1000, 2),

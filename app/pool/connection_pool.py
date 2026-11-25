@@ -49,7 +49,7 @@ class ConnectionPool:
 
     async def start(self) -> None:
         self._connector = aiohttp.TCPConnector(
-            limit=0,  # global unlimited; we enforce per-backend
+            limit=self.pool_config.max_total_connections,
             limit_per_host=self.pool_config.max_connections_per_backend,
             ttl_dns_cache=300,
             enable_cleanup_closed=True,
@@ -65,7 +65,8 @@ class ConnectionPool:
         self._session = aiohttp.ClientSession(
             connector=self._connector,
             timeout=timeout,
-            auto_decompress=True,
+            auto_decompress=False,  # preserve Content-Encoding and bytes verbatim
+            cookie_jar=aiohttp.DummyCookieJar(),  # never share upstream cookies across clients
         )
         self._cleanup_task = asyncio.create_task(self._idle_cleanup())
 
@@ -98,7 +99,11 @@ class ConnectionPool:
 
     async def release(self, backend_id: str) -> None:
         async with self._lock:
-            self._active_count[backend_id] = max(0, self._active_count[backend_id] - 1)
+            count = self._active_count.get(backend_id, 0)
+            if count <= 1:
+                self._active_count.pop(backend_id, None)
+            else:
+                self._active_count[backend_id] = count - 1
 
     def active_connections(self, backend_id: str) -> int:
         return self._active_count.get(backend_id, 0)

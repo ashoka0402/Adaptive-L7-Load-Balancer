@@ -10,6 +10,7 @@ import pytest
 from aiohttp import web
 
 from app.config import (
+    AllowedDestination,
     AppConfig,
     BackendConfig,
     HealthCheckConfig,
@@ -45,6 +46,7 @@ async def running_stack(*, response_status: int = 200, delay: float = 0):
     config = AppConfig(
         server=ServerConfig(host="127.0.0.1", port=0, admin_token="integration-secret-token"),
         backends=[BackendConfig(id="backend", host="127.0.0.1", port=backend_port)],
+        allowed_dynamic_destinations=[AllowedDestination(host="127.0.0.1", port=8999)],
         health_check=HealthCheckConfig(interval=60),
         persistence=PersistenceConfig(enabled=False),
     )

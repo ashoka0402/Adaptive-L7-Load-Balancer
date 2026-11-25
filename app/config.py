@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-class ServerConfig(BaseModel):
+class ConfigModel(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+
+class ServerConfig(ConfigModel):
     host: str = "0.0.0.0"
-    port: int = 8080
+    port: int = Field(default=8080, ge=0, le=65535)
     admin_token: str = ""
 
 
-class LoadBalancingConfig(BaseModel):
+class LoadBalancingConfig(ConfigModel):
     strategy: Literal[
         "round_robin",
         "weighted_round_robin",
@@ -26,7 +32,7 @@ class LoadBalancingConfig(BaseModel):
     ] = "adaptive"
 
 
-class AdaptiveWeightsConfig(BaseModel):
+class AdaptiveWeightsConfig(ConfigModel):
     latency: float = Field(default=0.35, ge=0)
     connections: float = Field(default=0.25, ge=0)
     queue: float = Field(default=0.15, ge=0)
@@ -34,7 +40,7 @@ class AdaptiveWeightsConfig(BaseModel):
     resources: float = Field(default=0.05, ge=0)
 
 
-class RequestClassRule(BaseModel):
+class RequestClassRule(ConfigModel):
     name: str = Field(min_length=1, max_length=40, pattern=r"^[a-zA-Z0-9_-]+$")
     path_prefix: str = Field(default="/", min_length=1, max_length=256)
     methods: list[str] = Field(default_factory=list, max_length=16)
@@ -42,7 +48,7 @@ class RequestClassRule(BaseModel):
     backend_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
-class IntelligenceConfig(BaseModel):
+class IntelligenceConfig(ConfigModel):
     enabled: bool = False
     autopilot: bool = False
     objective: Literal["balanced", "latency", "throughput", "reliability", "custom"] = "balanced"
@@ -79,7 +85,7 @@ class IntelligenceConfig(BaseModel):
         return self
 
 
-class AdaptiveConfig(BaseModel):
+class AdaptiveConfig(ConfigModel):
     interval: float = Field(default=1.0, gt=0)
     window_size: int = Field(default=100, ge=10)
     exploration: float = Field(default=0.03, ge=0, le=0.30)
@@ -97,12 +103,20 @@ class AdaptiveConfig(BaseModel):
         return self
 
 
-class BackendConfig(BaseModel):
-    id: str = Field(min_length=1, max_length=128)
+class BackendConfig(ConfigModel):
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
     host: str = Field(min_length=1, max_length=253)
     port: int = Field(ge=1, le=65535)
     weight: int = Field(default=1, ge=1, le=10000)
     capacity: int = Field(default=100, ge=1, le=1000000)
+
+    @field_validator("host")
+    @classmethod
+    def valid_host(cls, value: str) -> str:
+        # Exact DNS names or IPv4 only; never URL syntax, userinfo or paths.
+        if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", value):
+            raise ValueError("backend host must be a DNS name or IPv4 address")
+        return value.lower()
 
     @field_validator("weight")
     @classmethod
@@ -112,68 +126,79 @@ class BackendConfig(BaseModel):
         return v
 
 
-class HealthCheckConfig(BaseModel):
-    interval: float = 5.0
-    timeout: float = 2.0
-    failure_threshold: int = 3
-    recovery_threshold: int = 2
-    path: str = "/health"
+class AllowedDestination(ConfigModel):
+    host: str = Field(min_length=1, max_length=253)
+    port: int = Field(ge=1, le=65535)
+
+    @field_validator("host")
+    @classmethod
+    def valid_host(cls, value: str) -> str:
+        return BackendConfig.valid_host(value)
 
 
-class CircuitBreakerConfig(BaseModel):
-    failure_threshold: int = 5
-    recovery_timeout: float = 10.0
-    half_open_requests: int = 1
+class HealthCheckConfig(ConfigModel):
+    interval: float = Field(default=5.0, gt=0, le=3600)
+    timeout: float = Field(default=2.0, gt=0, le=60)
+    failure_threshold: int = Field(default=3, ge=1, le=1000)
+    recovery_threshold: int = Field(default=2, ge=1, le=1000)
+    path: str = Field(default="/health", pattern=r"^/(?!/)[^\s?#]*$")
 
 
-class ConnectionPoolConfig(BaseModel):
-    max_connections_per_backend: int = 100
-    max_idle_connections: int = 20
-    idle_timeout: float = 30.0
+class CircuitBreakerConfig(ConfigModel):
+    failure_threshold: int = Field(default=5, ge=1, le=1000)
+    recovery_timeout: float = Field(default=10.0, ge=0, le=3600)
+    half_open_requests: int = Field(default=1, ge=1, le=100)
 
 
-class TimeoutsConfig(BaseModel):
-    connect: float = 2.0
-    read: float = 5.0
-    write: float = 5.0
-    idle: float = 30.0
+class ConnectionPoolConfig(ConfigModel):
+    max_connections_per_backend: int = Field(default=100, ge=1, le=10000)
+    max_idle_connections: int = Field(default=20, ge=0, le=10000)
+    idle_timeout: float = Field(default=30.0, gt=0, le=3600)
+    max_total_connections: int = Field(default=1000, ge=1, le=20000)
 
 
-class RetryConfig(BaseModel):
+class TimeoutsConfig(ConfigModel):
+    connect: float = Field(default=2.0, gt=0, le=300)
+    read: float = Field(default=5.0, gt=0, le=300)
+    write: float = Field(default=5.0, gt=0, le=300)
+    idle: float = Field(default=30.0, gt=0, le=3600)
+
+
+class RetryConfig(ConfigModel):
     enabled: bool = True
-    max_attempts: int = 2
+    max_attempts: int = Field(default=2, ge=1, le=5)
     retryable_methods: list[str] = Field(default_factory=lambda: ["GET", "HEAD"])
     retryable_status_codes: list[int] = Field(default_factory=lambda: [502, 503, 504])
 
 
-class BackpressureConfig(BaseModel):
-    max_concurrent_requests: int = 1000
-    max_queue_size: int = 500
-    queue_timeout: float = 1.0
+class BackpressureConfig(ConfigModel):
+    max_concurrent_requests: int = Field(default=1000, ge=1, le=10000)
+    max_queue_size: int = Field(default=500, ge=0, le=10000)
+    queue_timeout: float = Field(default=1.0, gt=0, le=60)
 
 
-class LoggingConfig(BaseModel):
+class LoggingConfig(ConfigModel):
     level: str = "INFO"
     format: str = "json"
 
 
-class MetricsConfig(BaseModel):
+class MetricsConfig(ConfigModel):
     enabled: bool = True
     path: str = "/metrics"
 
 
-class RequestConfig(BaseModel):
-    max_body_size: int = 10 * 1024 * 1024
-    max_header_size: int = 8192
+class RequestConfig(ConfigModel):
+    max_body_size: int = Field(default=10 * 1024 * 1024, ge=1, le=64*1024*1024)
+    max_header_size: int = Field(default=8192, ge=1024, le=65536)
 
 
-class PersistenceConfig(BaseModel):
+class PersistenceConfig(ConfigModel):
     enabled: bool = True
     path: str = "data/pulse.db"
     snapshot_limit: int = Field(default=500, ge=1, le=10000)
 
 
-class ShadowConfig(BaseModel):
+class ShadowConfig(ConfigModel):
     enabled: bool = False
     sample_every: int = Field(default=100, ge=10, le=10000)
     queue_limit: int = Field(default=64, ge=1, le=256)
@@ -188,12 +213,17 @@ class ShadowConfig(BaseModel):
         return self
 
 
-class AppConfig(BaseModel):
+class AppConfig(ConfigModel):
     shadow: ShadowConfig = Field(default_factory=ShadowConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     load_balancing: LoadBalancingConfig = Field(default_factory=LoadBalancingConfig)
     adaptive: AdaptiveConfig = Field(default_factory=AdaptiveConfig)
-    backends: list[BackendConfig] = Field(default_factory=list)
+    backends: list[BackendConfig] = Field(default_factory=list, max_length=100)
+    allowed_dynamic_destinations: list[AllowedDestination] = Field(default_factory=list, max_length=100)
+
+    def destination_allowed(self, host: str, port: int) -> bool:
+        return any((host, port) == (b.host, b.port)
+                   for b in [*self.backends, *self.allowed_dynamic_destinations])
     health_check: HealthCheckConfig = Field(default_factory=HealthCheckConfig)
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
     connection_pool: ConnectionPoolConfig = Field(default_factory=ConnectionPoolConfig)
