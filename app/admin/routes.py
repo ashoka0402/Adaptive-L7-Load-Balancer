@@ -142,7 +142,7 @@ def setup_admin_routes(app: web.Application, switch_strategy: Callable[[str], No
         try:
             body = await request.json()
             if not isinstance(body, dict) or not isinstance(body.get("strategy"), str):
-                raise ValueError("strategy required")
+                raise TypeError("strategy required")
             switch_strategy(body["strategy"])
         except (TypeError, ValueError):
             return web.json_response({"error": "unknown routing strategy"}, status=400)

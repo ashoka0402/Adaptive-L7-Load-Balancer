@@ -213,15 +213,14 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
         for bid, node in nodes.items():
             node.backend.active_connections = len(node.active) + len(node.queue)
             peak_queue = max(peak_queue, len(node.queue))
-        if kind == "tick":
-            if current <= spec.duration+spec.warmup or len(completed_ids) < len(arrivals):
-                frame = {"time": current, "completed": len(rows), "offered": len(arrivals),
-                         "nodes": {bid: {"active": len(n.active), "queue": len(n.queue),
-                                         "capacity": n.capacity, "down": n.down, "routed": routed[bid]}
-                                   for bid,n in nodes.items()},
-                         "successes": successes}
-                timeline.append(frame)
-                await progress(frame)
+        if kind == "tick" and (current <= spec.duration+spec.warmup or len(completed_ids) < len(arrivals)):
+            frame = {"time": current, "completed": len(rows), "offered": len(arrivals),
+                     "nodes": {bid: {"active": len(n.active), "queue": len(n.queue),
+                                     "capacity": n.capacity, "down": n.down, "routed": routed[bid]}
+                               for bid,n in nodes.items()},
+                     "successes": successes}
+            timeline.append(frame)
+            await progress(frame)
         if processed % 256 == 0:
             await asyncio.sleep(0)
         if len(completed_ids) == len(arrivals) and current >= spec.duration+spec.warmup:
