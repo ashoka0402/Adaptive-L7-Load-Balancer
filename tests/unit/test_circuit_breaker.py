@@ -52,3 +52,14 @@ def test_half_open_failure_reopens(cb, backend):
     backend.circuit_state = CircuitState.HALF_OPEN
     cb.on_failure(backend)
     assert backend.circuit_state == CircuitState.OPEN
+
+
+def test_cancelled_half_open_probe_releases_slot(cb, backend):
+    backend.circuit_state = CircuitState.HALF_OPEN
+
+    assert cb.allow_request(backend)
+    assert not cb.can_attempt(backend)
+    cb.abort_request(backend)
+
+    assert cb.can_attempt(backend)
+    assert backend.half_open_in_flight == 0

@@ -22,37 +22,40 @@ class PassiveHealthMonitor:
     consecutive_failures and can mark a backend UNHEALTHY.
     """
 
-    def __init__(self, config: "HealthCheckConfig") -> None:
+    def __init__(self, config: HealthCheckConfig) -> None:
         self.config = config
 
-    def record_success(self, backend: "Backend", latency: float) -> None:
+    def record_success(self, backend: Backend, latency: float) -> None:
         backend.record_success(latency)
-        if backend.status == BackendStatus.UNHEALTHY:
-            if backend.consecutive_successes >= self.config.recovery_threshold:
-                backend.status = BackendStatus.HEALTHY
-                logger.info(
-                    "passive recovery: %s → HEALTHY",
-                    backend.id,
-                )
+        if (
+            backend.status == BackendStatus.UNHEALTHY
+            and backend.consecutive_successes >= self.config.recovery_threshold
+        ):
+            backend.status = BackendStatus.HEALTHY
+            logger.info(
+                "passive recovery: %s → HEALTHY",
+                backend.id,
+            )
 
     def record_failure(
         self,
-        backend: "Backend",
+        backend: Backend,
         *,
         is_timeout: bool = False,
         status_code: int | None = None,
     ) -> None:
         backend.record_failure()
         # Only treat connection-level and selected 5xx as health signals
-        serious = is_timeout or (
-            status_code is not None and status_code >= 500
-        )
-        if serious and backend.consecutive_failures >= self.config.failure_threshold:
-            if backend.status != BackendStatus.UNHEALTHY:
-                backend.status = BackendStatus.UNHEALTHY
-                logger.warning(
-                    "passive: %s → UNHEALTHY (timeout=%s status=%s)",
-                    backend.id,
-                    is_timeout,
-                    status_code,
-                )
+        serious = is_timeout or (status_code is not None and status_code >= 500)
+        if (
+            serious
+            and backend.consecutive_failures >= self.config.failure_threshold
+            and backend.status != BackendStatus.UNHEALTHY
+        ):
+            backend.status = BackendStatus.UNHEALTHY
+            logger.warning(
+                "passive: %s → UNHEALTHY (timeout=%s status=%s)",
+                backend.id,
+                is_timeout,
+                status_code,
+            )

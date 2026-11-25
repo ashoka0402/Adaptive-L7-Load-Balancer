@@ -1,24 +1,42 @@
 server:
   host: "0.0.0.0"
   port: 8080
-  admin_token: "admin-secret-token-change-me"
+  admin_token: "" # set with PULSE_ADMIN_TOKEN; startup rejects empty/default tokens
 
 load_balancing:
-  strategy: "latency_aware" # round_robin | weighted_round_robin | least_connections | latency_aware
+  strategy: "adaptive" # round_robin | weighted_round_robin | least_connections | latency_aware | adaptive
+
+adaptive:
+  interval: 1.0
+  window_size: 100
+  exploration: 0.03
+  min_probability: 0.005
+  slow_start_seconds: 30
+  smoothing: 0.30
+  max_probability_step: 0.15
+  weights:
+    latency: 0.35
+    connections: 0.25
+    queue: 0.15
+    errors: 0.20
+    resources: 0.05
 
 backends:
   - id: "backend-1"
     host: "backend-1"
     port: 8001
     weight: 1
+    capacity: 100
   - id: "backend-2"
     host: "backend-2"
     port: 8002
     weight: 2
+    capacity: 100
   - id: "backend-3"
     host: "backend-3"
     port: 8003
     weight: 1
+    capacity: 100
 
 health_check:
   interval: 5
@@ -65,3 +83,8 @@ metrics:
 request:
   max_body_size: 10485760 # 10MB
   max_header_size: 8192
+
+persistence:
+  enabled: true
+  path: "data/pulse.db"
+  snapshot_limit: 500

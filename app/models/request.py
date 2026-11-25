@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -18,9 +17,11 @@ class RequestContext:
     query_string: str = ""
     headers: dict[str, str] = field(default_factory=dict)
     start_time: float = field(default_factory=time.monotonic)
-    backend_id: Optional[str] = None
+    backend_id: str | None = None
     retry_count: int = 0
     selected_latency: float = 0.0
+    routing_reason: str = ""
+    hop_headers: set[str] = field(default_factory=set)
 
     @classmethod
     def create(
@@ -28,8 +29,8 @@ class RequestContext:
         method: str,
         path: str,
         query_string: str = "",
-        headers: Optional[dict[str, str]] = None,
-    ) -> "RequestContext":
+        headers: dict[str, str] | None = None,
+    ) -> RequestContext:
         hdrs = {k.lower(): v for k, v in (headers or {}).items()}
         rid = hdrs.get("x-request-id") or str(uuid.uuid4())
         return cls(

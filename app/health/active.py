@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
-from app.models.backend import BackendStatus, CircuitState
+from app.models.backend import BackendStatus
 
 if TYPE_CHECKING:
     from app.config import HealthCheckConfig
@@ -23,8 +23,8 @@ class ActiveHealthChecker:
 
     def __init__(
         self,
-        registry: "BackendRegistry",
-        config: "HealthCheckConfig",
+        registry: BackendRegistry,
+        config: HealthCheckConfig,
         session: aiohttp.ClientSession,
     ) -> None:
         self.registry = registry
@@ -54,11 +54,9 @@ class ActiveHealthChecker:
             except Exception:
                 logger.exception("health check loop error")
             try:
-                await asyncio.wait_for(
-                    self._stop.wait(), timeout=self.config.interval
-                )
+                await asyncio.wait_for(self._stop.wait(), timeout=self.config.interval)
                 break
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     async def _check_all(self) -> None:
@@ -84,34 +82,38 @@ class ActiveHealthChecker:
                     self._on_success(backend, latency)
                 else:
                     self._on_failure(backend)
-        except Exception as exc:
+        except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             backend.last_health_check = time.time()
             logger.debug("health check failed for %s: %s", backend.id, exc)
             self._on_failure(backend)
 
     def _on_success(self, backend, latency: float) -> None:
-        backend.consecutive_successes += 1
-        backend.consecutive_failures = 0
-        backend.update_latency(latency)
+        backend.health_check_successes += 1
+        backend.health_check_failures = 0
+        backend.health_check_latency = latency
 
-        if backend.status == BackendStatus.UNHEALTHY:
-            if backend.consecutive_successes >= self.config.recovery_threshold:
-                backend.status = BackendStatus.HEALTHY
-                logger.info(
-                    "backend %s recovered → HEALTHY after %d successes",
-                    backend.id,
-                    backend.consecutive_successes,
-                )
+        if (
+            backend.status == BackendStatus.UNHEALTHY
+            and backend.health_check_successes >= self.config.recovery_threshold
+        ):
+            backend.status = BackendStatus.HEALTHY
+            logger.info(
+                "backend %s recovered → HEALTHY after %d successes",
+                backend.id,
+                backend.health_check_successes,
+            )
         # Circuit breaker recovery is handled separately; health is orthogonal
 
     def _on_failure(self, backend) -> None:
-        backend.consecutive_failures += 1
-        backend.consecutive_successes = 0
-        if backend.consecutive_failures >= self.config.failure_threshold:
-            if backend.status != BackendStatus.UNHEALTHY:
-                backend.status = BackendStatus.UNHEALTHY
-                logger.warning(
-                    "backend %s marked UNHEALTHY after %d failures",
-                    backend.id,
-                    backend.consecutive_failures,
-                )
+        backend.health_check_failures += 1
+        backend.health_check_successes = 0
+        if (
+            backend.health_check_failures >= self.config.failure_threshold
+            and backend.status != BackendStatus.UNHEALTHY
+        ):
+            backend.status = BackendStatus.UNHEALTHY
+            logger.warning(
+                "backend %s marked UNHEALTHY after %d failures",
+                backend.id,
+                backend.health_check_failures,
+            )

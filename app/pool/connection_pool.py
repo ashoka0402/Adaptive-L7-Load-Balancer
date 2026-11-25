@@ -6,7 +6,6 @@ import asyncio
 import logging
 import time
 from collections import defaultdict, deque
-from typing import Optional
 
 import aiohttp
 
@@ -41,12 +40,12 @@ class ConnectionPool:
     ) -> None:
         self.pool_config = pool_config
         self.timeouts = timeouts
-        self._connector: Optional[aiohttp.TCPConnector] = None
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._connector: aiohttp.TCPConnector | None = None
+        self._session: aiohttp.ClientSession | None = None
         self._idle: dict[str, deque[PooledConnection]] = defaultdict(deque)
         self._active_count: dict[str, int] = defaultdict(int)
         self._lock = asyncio.Lock()
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         self._connector = aiohttp.TCPConnector(
@@ -58,7 +57,7 @@ class ConnectionPool:
             keepalive_timeout=self.pool_config.idle_timeout,
         )
         timeout = aiohttp.ClientTimeout(
-            total=None,
+            total=self.timeouts.connect + self.timeouts.read + self.timeouts.write,
             connect=self.timeouts.connect,
             sock_read=self.timeouts.read,
             sock_connect=self.timeouts.connect,

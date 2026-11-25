@@ -1,4 +1,4 @@
-"""CLI entrypoint for the Adaptive L7 Load Balancer."""
+"""CLI entrypoint for Pulse."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import asyncio
 import logging
 import signal
 import sys
-from pathlib import Path
 
 from app.config import load_config
 from app.logging.structured import setup_logging
@@ -18,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Adaptive L7 HTTP Load Balancer",
+        description="Pulse — Adaptive Traffic Intelligence Engine",
     )
     p.add_argument(
         "-c",
@@ -45,6 +44,7 @@ def parse_args() -> argparse.Namespace:
             "weighted_round_robin",
             "least_connections",
             "latency_aware",
+            "adaptive",
         ],
         help="Override load-balancing strategy",
     )
@@ -97,7 +97,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     except Exception:
-        logging.exception("fatal error")
+        logger.exception("fatal error")
         sys.exit(1)
 
 

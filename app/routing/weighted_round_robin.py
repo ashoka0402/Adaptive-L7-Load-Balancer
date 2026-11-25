@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from app.models.backend import Backend
 from app.routing.base import LoadBalancingStrategy
 
@@ -23,12 +21,12 @@ class WeightedRoundRobinStrategy(LoadBalancingStrategy):
         # backend_id -> current_weight
         self._current_weights: dict[str, int] = {}
 
-    async def select_backend(self, backends: list[Backend]) -> Optional[Backend]:
+    async def select_backend(self, backends: list[Backend]) -> Backend | None:
         if not backends:
             return None
 
         total_weight = 0
-        selected: Optional[Backend] = None
+        selected: Backend | None = None
         max_current = -1
 
         for b in backends:

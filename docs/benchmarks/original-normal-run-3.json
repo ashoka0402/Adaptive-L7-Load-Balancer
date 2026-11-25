@@ -1,0 +1,28 @@
+{
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.13.14 (tags/v3.13.14:fd17997, Jun 10 2026, 13:03:48) [MSC v.1944 64 bit (AMD64)]"
+  },
+  "label": "original-normal-run-3",
+  "measurement": {
+    "average_ms": 239.99916781152447,
+    "elapsed_seconds": 5.074206600023899,
+    "errors": 0,
+    "p50_ms": 218.92340001068078,
+    "p95_ms": 407.10340000805445,
+    "p99_ms": 454.17680000537075,
+    "requests": 1019,
+    "rps": 200.8195724618703,
+    "statuses": {
+      "200": 1019
+    },
+    "successful": 1019
+  },
+  "timestamp": "2026-11-25T11:43:47.249826+00:00",
+  "workload": {
+    "concurrency": 50,
+    "duration_seconds": 5.0,
+    "url": "http://127.0.0.1:8080/api/test",
+    "warmup_seconds": 2.0
+  }
+}

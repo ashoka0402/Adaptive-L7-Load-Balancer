@@ -7,12 +7,14 @@ services:
       - "8080:8080"
     volumes:
       - ./config:/app/config:ro
+      - pulse-data:/app/data
     depends_on:
       - backend-1
       - backend-2
       - backend-3
     environment:
       - PYTHONUNBUFFERED=1
+      - PULSE_ADMIN_TOKEN=${PULSE_ADMIN_TOKEN:?set PULSE_ADMIN_TOKEN}
     restart: unless-stopped
 
   backend-1:
@@ -56,7 +58,7 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     depends_on:
       - load-balancer
     restart: unless-stopped
@@ -64,10 +66,10 @@ services:
   grafana:
     image: grafana/grafana:10.2.2
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -75,3 +77,6 @@ services:
     depends_on:
       - prometheus
     restart: unless-stopped
+
+volumes:
+  pulse-data:

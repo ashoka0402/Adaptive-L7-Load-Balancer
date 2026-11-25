@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from app.models.backend import Backend
 from app.routing.base import LoadBalancingStrategy
 
@@ -16,7 +14,7 @@ class LeastConnectionsStrategy(LoadBalancingStrategy):
     Complexity: O(n).
     """
 
-    async def select_backend(self, backends: list[Backend]) -> Optional[Backend]:
+    async def select_backend(self, backends: list[Backend]) -> Backend | None:
         if not backends:
             return None
         return min(

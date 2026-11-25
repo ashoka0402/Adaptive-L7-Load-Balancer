@@ -15,12 +15,12 @@ class RetryPolicy:
     only on retryable status codes or connection-level failures.
     """
 
-    def __init__(self, config: "RetryConfig") -> None:
+    def __init__(self, config: RetryConfig) -> None:
         self.config = config
 
     def should_retry(
         self,
-        ctx: "RequestContext",
+        ctx: RequestContext,
         *,
         status_code: int | None = None,
         is_connection_error: bool = False,
@@ -33,6 +33,4 @@ class RetryPolicy:
             return False
         if is_connection_error:
             return True
-        if status_code is not None and status_code in self.config.retryable_status_codes:
-            return True
-        return False
+        return status_code is not None and status_code in self.config.retryable_status_codes

@@ -1,0 +1,32 @@
+server:
+  host: "127.0.0.1"
+  port: 18081
+  admin_token: ""
+
+load_balancing:
+  strategy: "adaptive"
+
+adaptive:
+  interval: 1.0
+  window_size: 100
+  exploration: 0.03
+  min_probability: 0.005
+  slow_start_seconds: 5
+  smoothing: 0.30
+  max_probability_step: 0.15
+
+backends:
+  - {id: "backend-1", host: "127.0.0.1", port: 18101, capacity: 100}
+  - {id: "backend-2", host: "127.0.0.1", port: 18102, weight: 2, capacity: 100}
+  - {id: "backend-3", host: "127.0.0.1", port: 18103, capacity: 100}
+
+health_check: {interval: 5, timeout: 2, failure_threshold: 3, recovery_threshold: 2, path: "/health"}
+circuit_breaker: {failure_threshold: 5, recovery_timeout: 10, half_open_requests: 1}
+connection_pool: {max_connections_per_backend: 100, max_idle_connections: 20, idle_timeout: 30}
+timeouts: {connect: 2.0, read: 5.0, write: 5.0, idle: 30.0}
+retry: {enabled: true, max_attempts: 2, retryable_methods: ["GET", "HEAD"], retryable_status_codes: [502, 503, 504]}
+backpressure: {max_concurrent_requests: 100, max_queue_size: 50, queue_timeout: 1.0}
+logging: {level: "WARNING", format: "json"}
+metrics: {enabled: true, path: "/metrics"}
+request: {max_body_size: 10485760, max_header_size: 8192}
+persistence: {enabled: false, path: "data/benchmark.db", snapshot_limit: 10}

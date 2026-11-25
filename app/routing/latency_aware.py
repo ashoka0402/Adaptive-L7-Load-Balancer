@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Optional
+import zlib
 
 from app.models.backend import Backend
 from app.routing.base import LoadBalancingStrategy
@@ -36,13 +36,13 @@ class LatencyAwareStrategy(LoadBalancingStrategy):
         self.exploration = exploration
         self.stale_penalty = stale_penalty
 
-    async def select_backend(self, backends: list[Backend]) -> Optional[Backend]:
+    async def select_backend(self, backends: list[Backend]) -> Backend | None:
         if not backends:
             return None
         if len(backends) == 1:
             return backends[0]
 
-        best: Optional[Backend] = None
+        best: Backend | None = None
         best_score = math.inf
 
         for b in backends:
@@ -55,7 +55,8 @@ class LatencyAwareStrategy(LoadBalancingStrategy):
             score = latency * load_factor
 
             # Tiny deterministic exploration based on id hash to avoid pure sticky
-            score += self.exploration * (hash(b.id) % 100) / 10000.0
+            stable_id = zlib.crc32(b.id.encode("utf-8"))
+            score += self.exploration * (stable_id % 100) / 10000.0
 
             if score < best_score:
                 best_score = score

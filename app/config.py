@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -12,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
-    admin_token: str = "admin-secret-token-change-me"
+    admin_token: str = ""
 
 
 class LoadBalancingConfig(BaseModel):
@@ -21,14 +22,41 @@ class LoadBalancingConfig(BaseModel):
         "weighted_round_robin",
         "least_connections",
         "latency_aware",
-    ] = "latency_aware"
+        "adaptive",
+    ] = "adaptive"
+
+
+class AdaptiveWeightsConfig(BaseModel):
+    latency: float = Field(default=0.35, ge=0)
+    connections: float = Field(default=0.25, ge=0)
+    queue: float = Field(default=0.15, ge=0)
+    errors: float = Field(default=0.20, ge=0)
+    resources: float = Field(default=0.05, ge=0)
+
+
+class AdaptiveConfig(BaseModel):
+    interval: float = Field(default=1.0, gt=0)
+    window_size: int = Field(default=100, ge=10)
+    exploration: float = Field(default=0.03, ge=0, le=0.30)
+    min_probability: float = Field(default=0.005, ge=0, le=0.10)
+    slow_start_seconds: float = Field(default=30.0, ge=0)
+    smoothing: float = Field(default=0.30, gt=0, le=1)
+    max_probability_step: float = Field(default=0.15, gt=0, le=1)
+    weights: AdaptiveWeightsConfig = Field(default_factory=AdaptiveWeightsConfig)
+
+    @model_validator(mode="after")
+    def ensure_weight(self) -> AdaptiveConfig:
+        if sum(self.weights.model_dump().values()) <= 0:
+            raise ValueError("at least one adaptive metric weight must be positive")
+        return self
 
 
 class BackendConfig(BaseModel):
-    id: str
-    host: str
-    port: int
-    weight: int = 1
+    id: str = Field(min_length=1, max_length=128)
+    host: str = Field(min_length=1, max_length=253)
+    port: int = Field(ge=1, le=65535)
+    weight: int = Field(default=1, ge=1, le=10000)
+    capacity: int = Field(default=100, ge=1, le=1000000)
 
     @field_validator("weight")
     @classmethod
@@ -69,9 +97,7 @@ class RetryConfig(BaseModel):
     enabled: bool = True
     max_attempts: int = 2
     retryable_methods: list[str] = Field(default_factory=lambda: ["GET", "HEAD"])
-    retryable_status_codes: list[int] = Field(
-        default_factory=lambda: [502, 503, 504]
-    )
+    retryable_status_codes: list[int] = Field(default_factory=lambda: [502, 503, 504])
 
 
 class BackpressureConfig(BaseModel):
@@ -95,9 +121,16 @@ class RequestConfig(BaseModel):
     max_header_size: int = 8192
 
 
+class PersistenceConfig(BaseModel):
+    enabled: bool = True
+    path: str = "data/pulse.db"
+    snapshot_limit: int = Field(default=500, ge=1, le=10000)
+
+
 class AppConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     load_balancing: LoadBalancingConfig = Field(default_factory=LoadBalancingConfig)
+    adaptive: AdaptiveConfig = Field(default_factory=AdaptiveConfig)
     backends: list[BackendConfig] = Field(default_factory=list)
     health_check: HealthCheckConfig = Field(default_factory=HealthCheckConfig)
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
@@ -108,9 +141,14 @@ class AppConfig(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     request: RequestConfig = Field(default_factory=RequestConfig)
+    persistence: PersistenceConfig = Field(default_factory=PersistenceConfig)
 
     @model_validator(mode="after")
-    def ensure_backends(self) -> "AppConfig":
+    def ensure_backends(self) -> AppConfig:
+        if self.server.admin_token in {"", "admin-secret-token-change-me"} or len(
+            self.server.admin_token
+        ) < 16:
+            raise ValueError("admin token must be an external secret of at least 16 characters")
         if not self.backends:
             raise ValueError("at least one backend must be configured")
         ids = [b.id for b in self.backends]
@@ -126,4 +164,10 @@ def load_config(path: str | Path) -> AppConfig:
         raise FileNotFoundError(f"config file not found: {path}")
     with path.open() as f:
         raw: dict[str, Any] = yaml.safe_load(f) or {}
+    token = os.environ.get("PULSE_ADMIN_TOKEN")
+    if token:
+        raw.setdefault("server", {})["admin_token"] = token
+    configured_token = raw.get("server", {}).get("admin_token", "")
+    if configured_token in {"", "admin-secret-token-change-me"} or len(configured_token) < 16:
+        raise ValueError("set PULSE_ADMIN_TOKEN to a secret of at least 16 characters")
     return AppConfig.model_validate(raw)

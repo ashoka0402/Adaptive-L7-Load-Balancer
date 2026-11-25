@@ -24,10 +24,18 @@ class CircuitBreaker:
     HALF_OPEN --failure--> OPEN
     """
 
-    def __init__(self, config: "CircuitBreakerConfig") -> None:
+    def __init__(self, config: CircuitBreakerConfig) -> None:
         self.config = config
 
-    def allow_request(self, backend: "Backend") -> bool:
+    def can_attempt(self, backend: Backend) -> bool:
+        """Check eligibility without reserving a half-open probe."""
+        if backend.circuit_state == CircuitState.CLOSED:
+            return True
+        if backend.circuit_state == CircuitState.OPEN:
+            return time.monotonic() - backend.circuit_opened_at >= self.config.recovery_timeout
+        return backend.half_open_in_flight < self.config.half_open_requests
+
+    def allow_request(self, backend: Backend) -> bool:
         """Return True if a request may be sent to this backend."""
         state = backend.circuit_state
 
@@ -45,13 +53,18 @@ class CircuitBreaker:
         # HALF_OPEN
         return self._try_half_open(backend)
 
-    def _try_half_open(self, backend: "Backend") -> bool:
+    def _try_half_open(self, backend: Backend) -> bool:
         if backend.half_open_in_flight < self.config.half_open_requests:
             backend.half_open_in_flight += 1
             return True
         return False
 
-    def on_success(self, backend: "Backend") -> None:
+    def abort_request(self, backend: Backend) -> None:
+        """Release a reserved recovery probe that produced no outcome."""
+        if backend.circuit_state == CircuitState.HALF_OPEN:
+            backend.half_open_in_flight = max(0, backend.half_open_in_flight - 1)
+
+    def on_success(self, backend: Backend) -> None:
         if backend.circuit_state == CircuitState.HALF_OPEN:
             backend.circuit_state = CircuitState.CLOSED
             backend.half_open_in_flight = 0
@@ -59,7 +72,7 @@ class CircuitBreaker:
             logger.info("circuit %s HALF_OPEN → CLOSED", backend.id)
         # In CLOSED we just keep counting successes via health monitors
 
-    def on_failure(self, backend: "Backend") -> None:
+    def on_failure(self, backend: Backend) -> None:
         if backend.circuit_state == CircuitState.HALF_OPEN:
             backend.circuit_state = CircuitState.OPEN
             backend.circuit_opened_at = time.monotonic()
@@ -67,12 +80,14 @@ class CircuitBreaker:
             logger.warning("circuit %s HALF_OPEN → OPEN", backend.id)
             return
 
-        if backend.circuit_state == CircuitState.CLOSED:
-            if backend.consecutive_failures >= self.config.failure_threshold:
-                backend.circuit_state = CircuitState.OPEN
-                backend.circuit_opened_at = time.monotonic()
-                logger.warning(
-                    "circuit %s CLOSED → OPEN after %d failures",
-                    backend.id,
-                    backend.consecutive_failures,
-                )
+        if (
+            backend.circuit_state == CircuitState.CLOSED
+            and backend.consecutive_failures >= self.config.failure_threshold
+        ):
+            backend.circuit_state = CircuitState.OPEN
+            backend.circuit_opened_at = time.monotonic()
+            logger.warning(
+                "circuit %s CLOSED → OPEN after %d failures",
+                backend.id,
+                backend.consecutive_failures,
+            )

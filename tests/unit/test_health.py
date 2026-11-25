@@ -1,8 +1,9 @@
 """Health monitoring unit tests."""
 
 from app.config import HealthCheckConfig
+from app.health.active import ActiveHealthChecker
 from app.health.passive import PassiveHealthMonitor
-from app.models.backend import Backend, BackendStatus
+from app.models.backend import Backend, BackendRegistry, BackendStatus
 
 
 def test_passive_marks_unhealthy():
@@ -29,3 +30,16 @@ def test_ewma_update():
     assert abs(b.average_latency - 0.1) < 1e-9
     b.update_latency(0.2, alpha=0.5)
     assert abs(b.average_latency - 0.15) < 1e-9
+
+
+def test_active_probe_does_not_contaminate_application_telemetry():
+    checker = ActiveHealthChecker(BackendRegistry(), HealthCheckConfig(), None)
+    backend = Backend(id="b1", host="h", port=1)
+    backend.record_failure()
+
+    checker._on_success(backend, 0.25)
+
+    assert backend.consecutive_failures == 1
+    assert backend.average_latency == 0
+    assert backend.health_check_successes == 1
+    assert backend.health_check_latency == 0.25

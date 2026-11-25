@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.models.backend import Backend, BackendStatus
+from app.models.backend import Backend
 from app.routing.latency_aware import LatencyAwareStrategy
 from app.routing.least_connections import LeastConnectionsStrategy
 from app.routing.round_robin import RoundRobinStrategy
@@ -10,17 +10,14 @@ from app.routing.weighted_round_robin import WeightedRoundRobinStrategy
 
 
 def _backends(n: int = 3) -> list[Backend]:
-    return [
-        Backend(id=f"b{i}", host="h", port=8000 + i, weight=1)
-        for i in range(1, n + 1)
-    ]
+    return [Backend(id=f"b{i}", host="h", port=8000 + i, weight=1) for i in range(1, n + 1)]
 
 
 @pytest.mark.asyncio
 async def test_round_robin_cycles():
     s = RoundRobinStrategy()
     backends = _backends(3)
-    order = [ (await s.select_backend(backends)).id for _ in range(6) ]
+    order = [(await s.select_backend(backends)).id for _ in range(6)]
     assert order == ["b1", "b2", "b3", "b1", "b2", "b3"]
 
 
@@ -70,5 +67,5 @@ async def test_latency_aware_prefers_faster():
     backends[2].average_latency = 0.025
     backends[2].successful_requests = 10
     # Run several times; should strongly prefer b1 or b3
-    picks = [ (await s.select_backend(backends)).id for _ in range(20) ]
+    picks = [(await s.select_backend(backends)).id for _ in range(20)]
     assert picks.count("b2") < 5

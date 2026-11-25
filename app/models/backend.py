@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 
 class BackendStatus(str, Enum):
@@ -28,6 +27,7 @@ class Backend:
     host: str
     port: int
     weight: int = 1
+    capacity: int = 100
     status: BackendStatus = BackendStatus.HEALTHY
     active_connections: int = 0
     total_requests: int = 0
@@ -35,13 +35,17 @@ class Backend:
     failed_requests: int = 0
     consecutive_failures: int = 0
     consecutive_successes: int = 0
+    health_check_failures: int = 0
+    health_check_successes: int = 0
     average_latency: float = 0.0  # EWMA latency in seconds
     recent_latency: float = 0.0
+    health_check_latency: float = 0.0
     last_health_check: float = 0.0
     circuit_state: CircuitState = CircuitState.CLOSED
     circuit_opened_at: float = 0.0
     half_open_in_flight: int = 0
     enabled: bool = True
+    registered_at: float = field(default_factory=time.monotonic)
 
     @property
     def address(self) -> str:
@@ -56,9 +60,7 @@ class Backend:
             return False
         if self.status == BackendStatus.UNHEALTHY:
             return False
-        if self.circuit_state == CircuitState.OPEN:
-            return False
-        return True
+        return self.circuit_state != CircuitState.OPEN
 
     def update_latency(self, observed: float, alpha: float = 0.3) -> None:
         """Update EWMA latency estimate."""
@@ -87,6 +89,7 @@ class Backend:
             "host": self.host,
             "port": self.port,
             "weight": self.weight,
+            "capacity": self.capacity,
             "status": self.status.value,
             "active_connections": self.active_connections,
             "total_requests": self.total_requests,
@@ -94,8 +97,11 @@ class Backend:
             "failed_requests": self.failed_requests,
             "consecutive_failures": self.consecutive_failures,
             "consecutive_successes": self.consecutive_successes,
+            "health_check_failures": self.health_check_failures,
+            "health_check_successes": self.health_check_successes,
             "average_latency_ms": round(self.average_latency * 1000, 2),
             "recent_latency_ms": round(self.recent_latency * 1000, 2),
+            "health_check_latency_ms": round(self.health_check_latency * 1000, 2),
             "last_health_check": self.last_health_check,
             "circuit_state": self.circuit_state.value,
             "enabled": self.enabled,
@@ -115,13 +121,13 @@ class BackendRegistry:
         self.backends[backend.id] = backend
         self._order.append(backend.id)
 
-    def remove(self, backend_id: str) -> Optional[Backend]:
+    def remove(self, backend_id: str) -> Backend | None:
         if backend_id not in self.backends:
             return None
         self._order = [i for i in self._order if i != backend_id]
         return self.backends.pop(backend_id)
 
-    def get(self, backend_id: str) -> Optional[Backend]:
+    def get(self, backend_id: str) -> Backend | None:
         return self.backends.get(backend_id)
 
     def list_all(self) -> list[Backend]:
@@ -131,8 +137,4 @@ class BackendRegistry:
         return [b for b in self.list_all() if b.is_available]
 
     def healthy(self) -> list[Backend]:
-        return [
-            b
-            for b in self.list_all()
-            if b.status == BackendStatus.HEALTHY and b.enabled
-        ]
+        return [b for b in self.list_all() if b.status == BackendStatus.HEALTHY and b.enabled]

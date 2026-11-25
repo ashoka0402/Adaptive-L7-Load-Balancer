@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -20,7 +19,7 @@ class BackpressureController:
     When the queue is full or wait times out → 503 (load shed).
     """
 
-    def __init__(self, config: "BackpressureConfig") -> None:
+    def __init__(self, config: BackpressureConfig) -> None:
         self.config = config
         self._semaphore = asyncio.Semaphore(config.max_concurrent_requests)
         self._queue_size = 0
@@ -48,7 +47,7 @@ class BackpressureController:
                 self._semaphore.acquire(),
                 timeout=self.config.queue_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             async with self._lock:
                 self._queue_size -= 1
                 self.rejected_total += 1
