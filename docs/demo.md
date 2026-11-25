@@ -1,14 +1,14 @@
-# Guided demo: observe, disrupt, verify
+# Five-minute demo
 
-Allow roughly three to five minutes after the initial Docker build. The time is a suggested demonstration pace, not a benchmark result.
+1. Start Docker Compose and open the Dashboard. Connect with the admin token.
+2. Choose Round Robin. Generate 200 requests at concurrency 10. Explain distribution and server latency.
+3. Choose Weighted Round Robin and generate another batch. The configured weights are 1:2:1; backend counters are cumulative.
+4. Disable one backend, generate traffic again and re-enable it. Explain the difference between manual disable, active health checks and circuit breaking.
+5. Open Battle Arena. Run the same isolated HTTP workload for all four strategies and compare measured throughput, p95/p99 and errors. Repeat in simulation mode if desired.
 
-1. Set strong local secrets and start `docker compose up --build`. Open http://localhost:8080/pulse/ and connect using the admin token.
-2. Overview: generate a few ordinary HTTP requests to `/api/test` and observe the live nodes and routing explanations. Do not confuse this with simulated traffic.
-3. Traffic Lab: choose simulation, 240 RPS, 8 seconds, burst pattern, seed 7, Round Robin, Pulse Adaptive, and Pulse Predictive. Add a fourth backend with capacity 5 and latency 45 ms. Use the burst + failure preset, or schedule a latency spike at 2.5s, shutdown at 4s and restore at 6s.
-4. Launch. Read the actual performance ledger, error and tail latency metrics. In the synchronized comparison scrub to before/after failure. Inspect route-count density, queues and capacity. Note any policy that outperforms Pulse.
-5. Traffic Replay: select the experiment and replay exactly the same specification. Change playback speed and seek the fault markers. Export raw JSON/CSV.
-6. Autopilot: inspect objective, SLO targets and observed history. Explain why forecast confidence and bounded changes matter. Do not enable online learning without a reason and guardrails.
-7. Optional real HTTP experiment: choose HTTP mode, 50 RPS, 4 seconds, concurrency 24, one repeat, two algorithms. This uses isolated local listeners and synthetic application faults, not the live fleet.
-8. Finish with the [Actions evidence](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions) and [benchmarks](benchmarks/README.md). Present real values from the actual run, including unfavorable outcomes.
+For a real backend failure, run `docker compose stop backend-2`, allow the configured health-check thresholds to be reached, then run `docker compose start backend-2`. No production systems are involved. Never claim one algorithm always wins.
 
-The UI is a sampled visualization, not packet capture. The demo has no predetermined winner.
+For a command-line test:
+```bash
+python -m benchmarks.run_benchmarks --url http://127.0.0.1:8080/api/test --concurrency 20 --duration 5
+```

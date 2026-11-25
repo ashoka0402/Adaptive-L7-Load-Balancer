@@ -1,64 +1,30 @@
-"""Latency-aware adaptive routing with EWMA and load awareness."""
+"""EWMA latency-aware routing with a simple outstanding-request penalty."""
 
 from __future__ import annotations
-
-import math
-import zlib
 
 from app.models.backend import Backend
 from app.routing.base import LoadBalancingStrategy
 
 
 class LatencyAwareStrategy(LoadBalancingStrategy):
-    """
-    Adaptive latency-aware routing.
+    """Choose the lowest EWMA latency multiplied by a load penalty.
 
-    Score for each backend:
-        score = latency_ewma * (1 + active_connections / capacity_factor)
-
-    Lower score is better. A small deterministic tie-break separates otherwise similar scores.
-
-    Tradeoffs:
-    - Pure lowest-latency can overload the fastest backend.
-    - Combining with active connections provides natural backpressure.
-    - EWMA smooths noise; alpha controls responsiveness (default 0.3).
-    - Stale latency (no recent samples) is treated as higher cost.
+    Unobserved backends use a conservative default. Ties are stable by backend ID.
+    The fixed capacity factor is a tuning constant, not a capacity estimator.
     """
 
-    def __init__(
-        self,
-        capacity_factor: float = 50.0,
-        exploration: float = 0.05,
-        stale_penalty: float = 1.5,
-    ) -> None:
+    def __init__(self, capacity_factor: float = 50.0, stale_penalty: float = 1.5) -> None:
         self.capacity_factor = capacity_factor
-        self.exploration = exploration
         self.stale_penalty = stale_penalty
 
     async def select_backend(self, backends: list[Backend]) -> Backend | None:
         if not backends:
             return None
-        if len(backends) == 1:
-            return backends[0]
 
-        best: Backend | None = None
-        best_score = math.inf
-
-        for b in backends:
-            latency = b.average_latency if b.average_latency > 0 else 0.05
-            # Penalize backends with no successful traffic yet slightly less aggressively
-            if b.successful_requests == 0:
+        def score(backend: Backend) -> tuple[float, str]:
+            latency = backend.average_latency or 0.05
+            if backend.successful_requests == 0:
                 latency *= self.stale_penalty
+            return latency * (1 + backend.active_connections / self.capacity_factor), backend.id
 
-            load_factor = 1.0 + (b.active_connections / self.capacity_factor)
-            score = latency * load_factor
-
-            # Small deterministic tie-break based on backend ID
-            stable_id = zlib.crc32(b.id.encode("utf-8"))
-            score += self.exploration * (stable_id % 100) / 10000.0
-
-            if score < best_score:
-                best_score = score
-                best = b
-
-        return best
+        return min(backends, key=score)

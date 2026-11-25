@@ -1,90 +1,65 @@
-<div align="center">
+# Pulse — Layer 7 Load Balancer
 
-# PULSE
-### Adaptive Traffic Intelligence Engine
+A focused Python asyncio project that demonstrates HTTP reverse proxying, routing algorithms, backend health, fault tolerance and real performance measurement. Built for learning and technical interviews, not marketed as a production replacement for NGINX or AWS.
 
-**Traffic is a signal. Read it.**
+## Run locally
 
-Don't just distribute traffic. Understand it.
+Start Docker Desktop and run from the repository in PowerShell:
 
-[![Pulse verification](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions/workflows/verify.yml/badge.svg)](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions/workflows/verify.yml)
+```powershell
+$env:PULSE_ADMIN_TOKEN = "replace-with-a-long-local-secret"
+$env:GRAFANA_ADMIN_PASSWORD = "replace-with-a-different-local-secret"
+docker compose up --build -d load-balancer
+```
 
-[Quick start](#quick-start) · [Console](docs/console.md) · [Benchmarks](docs/benchmarks/README.md) · [Demo](docs/demo.md) · [Architecture](ARCHITECTURE.md)
+Open **http://localhost:8080/pulse/** and enter the admin token. If port 8080 is occupied, set `$env:PULSE_PORT = "8081"` before starting Compose and open port 8081 instead. The internal container port stays 8080.
 
-</div>
+To start optional Prometheus and Grafana, run `docker compose up -d prometheus grafana`. Stop the demo with `docker compose down`.
 
-Pulse is a production-inspired asynchronous Layer 7 HTTP reverse proxy and traffic experimentation engine. Rather than always selecting the lowest-latency server, it uses multidimensional feedback and immutable policy snapshots to distribute requests among eligible backends. Prediction, SLO-aware weight blending and optional bounded learning build on that controller.
+## Two screens
 
-## The system
+- **Dashboard:** switch the real routing algorithm, see request counts, throughput, p95 latency, errors, backend health, active connections and distribution; generate bounded HTTP traffic and disable/re-enable backends.
+- **Battle Arena:** compare all four algorithms using the same seeded workload. Choose real local HTTP or labeled queue simulation. View throughput, p95/p99 and error counts.
+
+## Four routing algorithms
+
+| Algorithm | How it works |
+| --- | --- |
+| Round Robin | Rotate across available backends |
+| Weighted Round Robin | Smooth distribution in configured weight proportions |
+| Least Connections | Select the fewest active upstream requests |
+| EWMA | Prefer lower measured latency with a simple load penalty |
+
+Core reliability includes active/passive health checks, circuit breakers, safe bounded retries before response streaming, connection pooling, timeouts, bounded concurrency and backpressure. Management APIs require a bearer token. The console uses actual instance telemetry and experiment results.
 
 ```mermaid
 flowchart LR
-  Clients --> Admission --> Router
-  Router --> B1[Backend 1]
-  Router --> B2[Backend 2]
-  Router --> B3[Backend 3]
-  B1 --> Telemetry
-  B2 --> Telemetry
-  B3 --> Telemetry
-  Telemetry --> Controller
-  Controller --> Snapshot[Immutable policy]
-  Snapshot --> Router
-  Console --> API[Authenticated control plane]
-  API --> Controller
-  API --> Lab[Isolated Lab / Arena]
-  Lab --> Replay[Recorded outcomes]
+    Client --> Proxy[Async HTTP proxy]
+    Proxy --> Admission[Bounded admission]
+    Admission --> Router[Selected routing algorithm]
+    Router --> B1[Backend 1]
+    Router --> B2[Backend 2]
+    Router --> B3[Backend 3]
+    B1 --> Health[Health and metrics]
+    B2 --> Health
+    B3 --> Health
+    Health --> Router
+    Health --> Dashboard[Dashboard]
 ```
 
-| Capability | Behavior |
-| --- | --- |
-| Pulse Core | Baseline algorithms and multidimensional probabilistic routing |
-| Pulse Predict | Bounded regression forecasts and class-aware fingerprints |
-| Autopilot | SLO feedback, bounded objective blending, cooldown and rollback |
-| Resilience | Health checks, circuit breakers, cancellation-safe backpressure and retries |
-| Lab / Chaos | Seeded queues and isolated local HTTP workloads with scheduled faults |
-| Arena / Replay | Eight experiment strategies, identical seeded traces, raw results and synchronized playback |
-| Shadow | Sampled decision estimates without duplicate upstream traffic |
-| Console | Live sampled topology, charts, experiment controls, SLO settings and backend inspector |
-
-## Quick start
-
-Python 3.12+ or Docker. Set unique local secrets; never use production credentials for a demo.
-
-```powershell
-$env:PULSE_ADMIN_TOKEN = "replace-with-a-long-random-secret"
-$env:GRAFANA_ADMIN_PASSWORD = "replace-with-a-different-random-secret"
-docker compose up --build
-```
-
-Open **http://localhost:8080/pulse/** and enter the configured admin token. Prometheus is at port 9090 and Grafana at 3000. Services bind to loopback by default.
-
-For development without Docker use `python -m pip install -e '.[dev]'`, start local demo backends, configure their loopback addresses and run `python -m app.main -c config/config.yaml`. See the [guided demo](docs/demo.md).
-
-## Screenshots and verification
-
-Actual landing, overview, Arena and mobile screenshots are generated by the Chromium test and uploaded in the `pulse-console-browser-evidence` artifact. [Open Actions and choose a successful run](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions). These are real application screenshots, not mockups. No UI metric is hardcoded as measured data.
+## Verification
 
 ```bash
+python -m pip install -e '.[dev]'
 python -m pytest -ra
 ruff check .
 mypy app
 node --test frontend_tests/model.test.mjs
+python -m benchmarks.run_arena --output reports/arena.json
 ```
 
-## Routing and performance
+[GitHub Actions](https://github.com/ashoka0402/Adaptive-L7-Load-Balancer/actions) runs Python tests, type checking, Chromium browser tests, a real HTTP benchmark and Docker smoke checks. The browser artifact contains actual screenshots. No performance result is assumed.
 
-The adaptive score combines weighted normalized latency, concurrency, queue pressure, error rate and resource signals. The controller adds a bounded prediction penalty and maps scores to probabilities, accounting for weight, slow start, exploration and movement limits. Eligibility and circuit checks remain mandatory.
+[Architecture](ARCHITECTURE.md) · [Demo guide](docs/demo.md) · [Benchmark methodology](docs/benchmarks/README.md) · [Interview guide](docs/interview.md) · [Security and limits](docs/release.md)
 
-One previously recorded deterministic simulation reported 66 errors for Pulse adaptive versus 118 for EWMA, with higher p95 latency (19.38 ms versus 15.22 ms). That is a scenario-specific trade-off, **not an HTTP throughput improvement**. See the committed [raw benchmark evidence](docs/benchmarks/README.md).
-
-The release workflow generates a same-runner historical/current HTTP comparison and Docker Arena reports. Download raw JSON from CI, including any unfavorable outcomes.
-
-## API and deployment
-
-All `/admin/*` endpoints require bearer authentication. The API covers backends, external telemetry, routing policy and weights, intelligence, Autopilot and runtime SLOs, experiments, SSE progress, replay/export, and shadow results. [Console](docs/console.md) and [experiment API](docs/experiments.md) document the operations. New backend destinations must be explicitly configured in the startup allowlist.
-
-## Engineering notes
-
-[Architecture](ARCHITECTURE.md) · [Implementation status](IMPLEMENTATION_STATUS.md) · [Release boundaries](docs/release.md) · [Interview guide](docs/interview.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
-
-Pulse is single-process and intended for trusted local experimentation. It is not a production-readiness certification. See the release notes for known limits before deployment.
+The earlier experimental adaptive intelligence engine was intentionally removed. Its source and historical measurements remain available in Git history. EWMA remains a conventional feedback-based routing algorithm, not an AI or predictive controller.
