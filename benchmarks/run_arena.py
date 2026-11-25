@@ -26,7 +26,7 @@ def main() -> None:
     parser.add_argument("--output",type=Path)
     args=parser.parse_args()
     spec=ExperimentSpec.model_validate_json(args.spec.read_text()) if args.spec else ExperimentSpec(
-        rps=100,duration=2,repetitions=3,algorithms=["round_robin","least_connections","adaptive","predictive","autopilot"]
+        rps=100,duration=2,repetitions=3,algorithms=["round_robin","weighted_round_robin","least_connections","latency_aware"]
     )
     result=json.dumps(asyncio.run(run(spec)),indent=2)
     if args.output:

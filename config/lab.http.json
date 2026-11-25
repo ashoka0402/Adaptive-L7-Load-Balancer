@@ -2,8 +2,8 @@
   "mode": "http",
   "algorithms": [
     "round_robin",
-    "adaptive",
-    "predictive"
+    "least_connections",
+    "latency_aware"
   ],
   "rps": 50,
   "duration": 4,

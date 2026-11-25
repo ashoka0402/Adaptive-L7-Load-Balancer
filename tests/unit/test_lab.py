@@ -15,9 +15,9 @@ async def ignore(frame):
 
 @pytest.mark.asyncio
 async def test_seeded_replay_same_outcomes_and_counts():
-    spec=ExperimentSpec(rps=40,duration=1,pattern="mixed",algorithms=["predictive"])
-    a=await simulate(spec,"predictive",7,ignore)
-    b=await simulate(spec,"predictive",7,ignore)
+    spec=ExperimentSpec(rps=40,duration=1,pattern="mixed",algorithms=["latency_aware"])
+    a=await simulate(spec,"latency_aware",7,ignore)
+    b=await simulate(spec,"latency_aware",7,ignore)
     assert a==b
     assert len(a["requests"])==len(trace(spec,7))
     assert a["summary"]["successful"]+a["summary"]["errors"]==a["summary"]["offered"]
@@ -49,13 +49,12 @@ async def test_queue_capacity_and_client_timeout_are_real():
 
 
 @pytest.mark.asyncio
-async def test_arena_uses_same_arrivals_and_does_not_duplicate_shadow_requests():
-    spec=ExperimentSpec(rps=60,duration=1,shadow=["least_connections"],shadow_every=1)
+async def test_arena_uses_same_arrivals():
+    spec=ExperimentSpec(rps=60,duration=1)
     a=await simulate(spec,"round_robin",7,ignore)
     b=await simulate(spec,"least_connections",7,ignore)
     assert [(r["id"],r["arrival"]) for r in a["requests"]]==[(r["id"],r["arrival"]) for r in b["requests"]]
     assert len(a["requests"])==a["summary"]["offered"]
-    assert a["shadow"]["least_connections"]["samples"]==len(a["requests"])
 
 
 def test_external_targets_and_excessive_load_rejected():

@@ -4,39 +4,7 @@ server:
   admin_token: "" # set with PULSE_ADMIN_TOKEN; startup rejects empty/default tokens
 
 load_balancing:
-  strategy: "adaptive" # round_robin | weighted_round_robin | least_connections | latency_aware | adaptive
-
-adaptive:
-  interval: 1.0
-  window_size: 100
-  exploration: 0.03
-  min_probability: 0.005
-  slow_start_seconds: 30
-  smoothing: 0.30
-  max_probability_step: 0.15
-  intelligence:
-    enabled: true
-    autopilot: true
-    objective: balanced
-    learning: false
-    horizon_seconds: 3
-    p99_target_seconds: 0.1
-    error_target: 0.01
-    availability_target: 0.99
-    throughput_target: 0
-    rules:
-      - name: compute
-        path_prefix: /compute
-      - name: database
-        path_prefix: /db
-      - name: streaming
-        path_prefix: /stream
-  weights:
-    latency: 0.35
-    connections: 0.25
-    queue: 0.15
-    errors: 0.20
-    resources: 0.05
+  strategy: "round_robin"
 
 backends:
   - id: "backend-1"
@@ -104,4 +72,3 @@ request:
 persistence:
   enabled: true
   path: "data/pulse.db"
-  snapshot_limit: 500

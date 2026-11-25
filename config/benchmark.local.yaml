@@ -4,16 +4,7 @@ server:
   admin_token: ""
 
 load_balancing:
-  strategy: "adaptive"
-
-adaptive:
-  interval: 1.0
-  window_size: 100
-  exploration: 0.03
-  min_probability: 0.005
-  slow_start_seconds: 5
-  smoothing: 0.30
-  max_probability_step: 0.15
+  strategy: "round_robin"
 
 backends:
   - {id: "backend-1", host: "127.0.0.1", port: 18101, capacity: 100}
@@ -29,4 +20,4 @@ backpressure: {max_concurrent_requests: 100, max_queue_size: 50, queue_timeout: 
 logging: {level: "WARNING", format: "json"}
 metrics: {enabled: true, path: "/metrics"}
 request: {max_body_size: 10485760, max_header_size: 8192}
-persistence: {enabled: false, path: "data/benchmark.db", snapshot_limit: 10}
+persistence: {enabled: false, path: "data/benchmark.db"}

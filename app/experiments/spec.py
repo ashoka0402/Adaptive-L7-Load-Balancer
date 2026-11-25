@@ -63,7 +63,7 @@ def default_algorithms() -> list[Algorithm]:
 
 class ExperimentSpec(StrictModel):
     mode: Literal["simulation", "http"] = "simulation"
-    algorithms: list[Algorithm] = Field(default_factory=default_algorithms, min_length=1, max_length=8)
+    algorithms: list[Algorithm] = Field(default_factory=default_algorithms, min_length=1, max_length=4)
     nodes: list[NodeSpec] = Field(default_factory=default_nodes, min_length=1, max_length=8)
     seed: int = Field(default=7, ge=0, le=2**31-1)
     repetitions: int = Field(default=1, ge=1, le=5)
@@ -84,8 +84,6 @@ class ExperimentSpec(StrictModel):
         ids = {node.id for node in self.nodes}
         if len(ids) != len(self.nodes) or len(set(self.algorithms)) != len(self.algorithms):
             raise ValueError("duplicate backend or algorithm")
-        if len(set(self.shadow)) != len(self.shadow):
-            raise ValueError("duplicate shadow algorithm")
         if any(f.backend not in ids or f.at > self.duration + self.warmup for f in self.faults):
             raise ValueError("fault target or time outside experiment")
         if self.pattern == "custom":

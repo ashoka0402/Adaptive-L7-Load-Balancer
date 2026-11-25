@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from app.experiments.spec import ExperimentSpec, Fault, NodeSpec, trace
-from app.models.backend import Backend, BackendRegistry
+from app.models.backend import Backend
 from app.routing.base import LoadBalancingStrategy
 from app.routing.latency_aware import LatencyAwareStrategy
 from app.routing.least_connections import LeastConnectionsStrategy
@@ -99,11 +99,9 @@ def summarize(rows: list[dict], spec: ExperimentSpec, elapsed: float) -> dict:
 
 
 async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Progress) -> dict:
-    registry = BackendRegistry()
     nodes: dict[str, Node] = {}
     for n in spec.nodes:
         b = Backend(n.id, "simulation", 1, capacity=n.capacity, weight=n.weight, registered_at=0)
-        registry.add(b)
         nodes[n.id] = Node(n, b, n.capacity, error_rate=n.error_rate)
     router = strategy(algorithm)
     arrivals = trace(spec, seed)

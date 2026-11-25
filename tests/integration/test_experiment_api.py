@@ -16,7 +16,7 @@ async def test_experiment_api_auth_and_replay():
         async with session.post(f"{url}/admin/experiments",headers=headers,
                                 json={"target":"http://example.com"}) as response:
             assert response.status==400
-        spec={"algorithms":["round_robin","adaptive"],"rps":20,"duration":.4}
+        spec={"algorithms":["round_robin","latency_aware"],"rps":20,"duration":.4}
         async with session.post(f"{url}/admin/experiments",headers=headers,json=spec) as response:
             assert response.status==202
             first=(await response.json())["id"]

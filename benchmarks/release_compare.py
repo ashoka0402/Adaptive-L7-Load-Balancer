@@ -54,7 +54,6 @@ async def measure(root: Path, strategy: str, configs: list[dict], duration: floa
         "persistence": {"enabled": False},
         "logging": {"level": "WARNING"},
         "backpressure": {"max_concurrent_requests": 100, "max_queue_size": 50},
-        "adaptive": {"slow_start_seconds": 0, "intelligence": {"enabled": True, "autopilot": True}},
     }
     path = work / "benchmark-config.json"
     path.write_text(json.dumps(config), encoding="utf-8")
@@ -101,7 +100,7 @@ async def compare(args: argparse.Namespace) -> dict:
         variants = [
             ("original-ewma", args.baseline.resolve(), "latency_aware"),
             ("current-ewma", Path.cwd(), "latency_aware"),
-            ("pulse-adaptive", Path.cwd(), "adaptive"),
+            ("current-least-connections", Path.cwd(), "least_connections"),
         ]
         rows = []
         for repetition in range(args.repetitions):

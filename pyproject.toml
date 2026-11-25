@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pulse-traffic-engine"
 version = "2.0.0"
-description = "Pulse — Adaptive Traffic Intelligence Engine"
+description = "Pulse — HTTP Load Balancer"
 requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.9.0",

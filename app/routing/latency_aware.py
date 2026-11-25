@@ -16,8 +16,7 @@ class LatencyAwareStrategy(LoadBalancingStrategy):
     Score for each backend:
         score = latency_ewma * (1 + active_connections / capacity_factor)
 
-    Lower score is better. A small exploration term prevents permanent
-    starvation of slightly slower but healthy backends.
+    Lower score is better. A small deterministic tie-break separates otherwise similar scores.
 
     Tradeoffs:
     - Pure lowest-latency can overload the fastest backend.
@@ -54,7 +53,7 @@ class LatencyAwareStrategy(LoadBalancingStrategy):
             load_factor = 1.0 + (b.active_connections / self.capacity_factor)
             score = latency * load_factor
 
-            # Tiny deterministic exploration based on id hash to avoid pure sticky
+            # Small deterministic tie-break based on backend ID
             stable_id = zlib.crc32(b.id.encode("utf-8"))
             score += self.exploration * (stable_id % 100) / 10000.0
 

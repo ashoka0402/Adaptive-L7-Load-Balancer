@@ -18,11 +18,9 @@ Pulse is a single-process, asynchronous L7 traffic engine. Keep it a modular mon
 ## Data-plane invariants
 
 - Do not add blocking I/O or aggregate routing calculations to the request hot path.
-- Read one immutable routing snapshot per adaptive decision; publish snapshots by atomic reference replacement.
-- Bound queues, retries, request bodies, telemetry windows, and exploration traffic.
+- Bound queues, retries, request bodies, telemetry windows, and traffic generation.
 - Keep retries idempotent and decide them before committing a streamed client response.
 - Increment and decrement in-flight counters exactly once, including cancellation and error paths.
-- Prevent starvation, unbounded probability changes, and all-traffic concentration on one backend.
 - Treat health probes and application observations as distinct signals when changing their models.
 
 ## Concurrency and state
@@ -43,7 +41,6 @@ Pulse is a single-process, asynchronous L7 traffic engine. Keep it a modular mon
 
 ## Tests and benchmarks
 
-- Adaptive changes require deterministic tests for degradation, recovery, fairness, cold start, and bounded policy movement.
 - Proxy changes require integration coverage for forwarding, streaming, retries, cancellation, and counter cleanup.
 - Concurrency-sensitive fixes require a regression test that fails under the old behavior.
 - Store measured reports under `docs/benchmarks/`; label simulations separately from end-to-end HTTP measurements.
