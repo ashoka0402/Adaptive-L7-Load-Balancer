@@ -72,3 +72,35 @@ async def test_forwarding_preserves_gzip_and_does_not_share_cookies_or_admin_tok
     finally:
         await pulse.stop()
         await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_health_probe_does_not_follow_redirect():
+    from app.health.active import ActiveHealthChecker
+    from app.models.backend import Backend, BackendRegistry, BackendStatus
+
+    seen = []
+
+    async def redirect(_request):
+        return web.Response(status=302, headers={"Location": "/other"})
+
+    async def other(_request):
+        seen.append(True)
+        return web.Response(text="ok")
+
+    app = web.Application()
+    app.router.add_get("/health", redirect)
+    app.router.add_get("/other", other)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    try:
+        backend = Backend("b", "127.0.0.1", runner.addresses[0][1])
+        async with aiohttp.ClientSession() as session:
+            checker = ActiveHealthChecker(BackendRegistry(), HealthCheckConfig(failure_threshold=1), session)
+            await checker._check_one(backend)
+        assert seen == []
+        assert backend.status == BackendStatus.UNHEALTHY
+    finally:
+        await runner.cleanup()

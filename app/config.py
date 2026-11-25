@@ -229,8 +229,8 @@ class AppConfig(ConfigModel):
     allowed_dynamic_destinations: list[AllowedDestination] = Field(default_factory=list, max_length=100)
 
     def destination_allowed(self, host: str, port: int) -> bool:
-        return any((host, port) == (b.host, b.port)
-                   for b in [*self.backends, *self.allowed_dynamic_destinations])
+        return (any((host, port) == (b.host, b.port) for b in self.backends)
+                or any((host, port) == (b.host, b.port) for b in self.allowed_dynamic_destinations))
     health_check: HealthCheckConfig = Field(default_factory=HealthCheckConfig)
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
     connection_pool: ConnectionPoolConfig = Field(default_factory=ConnectionPoolConfig)
