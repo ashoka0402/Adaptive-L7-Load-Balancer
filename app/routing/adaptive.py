@@ -20,7 +20,9 @@ class AdaptiveStrategy(LoadBalancingStrategy):
         snapshot = self.controller.snapshot
         eligible = [(backend, snapshot.policies.get(backend.id)) for backend in backends]
         weighted = [(backend, policy) for backend, policy in eligible if policy is not None]
-        if not weighted:
+        # Newly added eligible backends may be missing from an older snapshot.
+        # Avoid starving them until the next policy publication.
+        if len(weighted) != len(backends):
             return self._rng.choice(backends)
         total = sum(policy.probability for _, policy in weighted)
         target = self._rng.random() * total

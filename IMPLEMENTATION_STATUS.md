@@ -8,7 +8,7 @@ Status reflects the repository contents, not planned behavior.
 - Selectable round-robin, smooth weighted round-robin, least-connections, legacy EWMA latency-aware, and adaptive routing strategies.
 - Bounded per-backend latency/error telemetry plus externally supplied queue depth, CPU, and memory utilization.
 - Periodic adaptive controller with normalized multidimensional scores, capacity estimation, configurable weights, cold-start prior, slow start, smoothing, bounded probability movement, minimum traffic, and exploration.
-- Immutable, versioned policy snapshots and weighted probabilistic selection on the request path.
+- Immutable, versioned policy snapshots and weighted probabilistic selection on the request path. Administrative backend mutations republish policies immediately; if eligible backends change between publications, selection temporarily falls back to uniform selection rather than starving newly registered backends.
 - Authenticated JSON endpoints for inspecting policy, changing metric weights, managing backends, and supplying backend telemetry.
 - Bounded asynchronous traffic generator with warm-up, percentiles, environment metadata, and JSON output.
 - SQLite persistence wired to controller publication with bounded policy history, plus experiment-result storage.
@@ -33,7 +33,7 @@ Status reflects the repository contents, not planned behavior.
 ## Validation state
 
 - Original commit `027d578`: 14 tests passed; Ruff reported 77 findings and mypy failed.
-- Pulse: 26 tests passed; Ruff, mypy, Black, compileall, and `git diff --check` pass.
+- Previous Pulse run: 26 tests passed; Ruff, mypy, Black, compileall, and `git diff --check` passed before the subsequent backend-registration fix. Follow-up regression tests are committed but were not executed in this review environment, so the updated tree is not yet independently test-verified.
 - The deterministic identical-workload simulation reduced errors from 118 to 66, while average latency rose from 11.41 ms to 13.47 ms. Raw results are in `docs/benchmarks/`.
 - No end-to-end throughput improvement is claimed because the runtime environments were not identical.
 

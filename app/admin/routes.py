@@ -70,6 +70,8 @@ async def add_backend(request: web.Request) -> web.Response:
 
     backend = Backend(id=bid, host=host, port=port, weight=weight, capacity=capacity)
     registry.add(backend)
+    controller: AdaptiveController = request.app[CONTROLLER_KEY]
+    controller.publish()
     logger.info("admin: added backend %s", bid)
     return web.json_response(backend.to_dict(), status=201)
 
@@ -113,6 +115,8 @@ async def update_backend(request: web.Request) -> web.Response:
     if status == "HEALTHY" and backend.status == BackendStatus.DRAINING:
         backend.status = BackendStatus.HEALTHY
 
+    controller: AdaptiveController = request.app[CONTROLLER_KEY]
+    controller.publish()
     return web.json_response(backend.to_dict())
 
 
@@ -127,6 +131,8 @@ async def delete_backend(request: web.Request) -> web.Response:
         return web.json_response({"error": "not found"}, status=404)
     pipeline: TelemetryPipeline = request.app[TELEMETRY_KEY]
     pipeline.remove(bid)
+    controller: AdaptiveController = request.app[CONTROLLER_KEY]
+    controller.publish()
     logger.info("admin: removed backend %s", bid)
     return web.json_response({"deleted": bid})
 

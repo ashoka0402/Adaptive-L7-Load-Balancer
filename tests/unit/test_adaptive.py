@@ -103,3 +103,30 @@ def test_external_telemetry_expires() -> None:
     assert snapshot.queue_depth == 0
     assert snapshot.cpu is None
     assert snapshot.memory is None
+
+
+@pytest.mark.asyncio
+async def test_new_backend_remains_eligible_before_policy_refresh() -> None:
+    registry, _, controller = _controller()
+    controller.publish()
+    registry.add(Backend("new", "host", 8003, capacity=20))
+    strategy = AdaptiveStrategy(controller, random.Random(7))
+
+    picks = [(await strategy.select_backend(registry.available())).id for _ in range(120)]
+    assert "new" in picks
+    assert set(picks) == {"healthy", "degraded", "new"}
+
+
+@pytest.mark.asyncio
+async def test_strategy_uses_only_eligible_candidates_with_stale_snapshot() -> None:
+    registry, telemetry, controller = _controller()
+    for _ in range(20):
+        telemetry.record("healthy", 0.01, True)
+        telemetry.record("degraded", 0.5, False)
+    controller.publish()
+    strategy = AdaptiveStrategy(controller, random.Random(11))
+    degraded = registry.get("degraded")
+    assert degraded is not None
+
+    for _ in range(30):
+        assert await strategy.select_backend([degraded]) is degraded

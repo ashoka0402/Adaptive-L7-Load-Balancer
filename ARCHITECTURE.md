@@ -51,7 +51,7 @@ Every controller interval, metrics are normalized across currently available bac
 - a bounded uniform exploration share and minimum probability;
 - a maximum probability step between snapshots.
 
-Scores become probabilities with `exp(-5 × score)`, adjusted by static backend weight and slow-start ramp. The controller publishes a frozen `RoutingPolicySnapshot` by replacing one reference. The hot path does not normalize metrics or calculate scores.
+Scores become probabilities with `exp(-5 × score)`, adjusted by static backend weight and slow-start ramp. The controller publishes a frozen `RoutingPolicySnapshot` by replacing one reference. The hot path does not normalize metrics or calculate scores. Administrative backend additions, removals, and updates immediately republish policy. If the eligible backend set changes before policy refresh, the selector temporarily falls back to uniform selection across eligible candidates to avoid starving a newly registered backend.
 
 Policy explanations and normalized metric contributions are available through authenticated `GET /admin/routing/policy`. Weights can be changed at runtime with `PATCH /admin/routing/weights`. External queue, CPU, and memory values can be supplied with `PUT /admin/backends/{id}/telemetry`.
 

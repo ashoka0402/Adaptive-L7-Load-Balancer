@@ -133,3 +133,36 @@ async def test_invalid_admin_update_is_atomic_and_bounded():
             json={"queue_depth": 10**20},
         ) as response:
             assert response.status == 400
+
+
+@pytest.mark.asyncio
+async def test_admin_backend_changes_publish_fresh_routing_policy():
+    headers = {"Authorization": "Bearer integration-secret-token"}
+    async with running_stack() as (pulse, _state, url), aiohttp.ClientSession() as session:
+        version = pulse.controller.snapshot.version
+        async with session.post(
+            f"{url}/admin/backends",
+            headers=headers,
+            json={"id": "extra", "host": "127.0.0.1", "port": 8999},
+        ) as response:
+            assert response.status == 201
+        assert pulse.controller.snapshot.version > version
+        assert "extra" in pulse.controller.snapshot.policies
+
+        version = pulse.controller.snapshot.version
+        async with session.patch(
+            f"{url}/admin/backends/extra",
+            headers=headers,
+            json={"enabled": False},
+        ) as response:
+            assert response.status == 200
+        assert pulse.controller.snapshot.version > version
+        assert "extra" not in pulse.controller.snapshot.policies
+
+        version = pulse.controller.snapshot.version
+        async with session.delete(
+            f"{url}/admin/backends/extra", headers=headers
+        ) as response:
+            assert response.status == 200
+        assert pulse.controller.snapshot.version > version
+        assert "extra" not in pulse.controller.snapshot.policies
