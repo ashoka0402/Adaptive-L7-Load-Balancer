@@ -8,8 +8,8 @@ import math
 import random
 import statistics
 from collections import Counter, deque
-from dataclasses import dataclass, field
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 
 from app.config import AdaptiveConfig, IntelligenceConfig, RequestClassRule
 from app.control.controller import AdaptiveController
@@ -135,6 +135,9 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
     completed_ids: set[int] = set()
     policy_changes = 0
     last_weights: dict = {}
+    busy_area = {n.id: 0.0 for n in spec.nodes}
+    queue_area = {n.id: 0.0 for n in spec.nodes}
+    capacity_area = {n.id: 0.0 for n in spec.nodes}
     peak_queue = 0
     successes = 0
 
@@ -186,7 +189,13 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
 
     processed = 0
     while events:
-        current, _, _, kind, payload = heapq.heappop(events)
+        event_time, _, _, kind, payload = heapq.heappop(events)
+        interval = max(0.0, event_time-max(current,spec.warmup))
+        for bid,node in nodes.items():
+            busy_area[bid] += len(node.active)*interval
+            queue_area[bid] += len(node.queue)*interval
+            capacity_area[bid] += node.capacity*interval
+        current = event_time
         processed += 1
         if kind == "fault":
             assert isinstance(payload, Fault)
@@ -273,7 +282,18 @@ async def simulate(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
     rows.sort(key=lambda row: row["id"])
     elapsed = max(spec.duration, max((r["completed"] for r in rows), default=0)-spec.warmup)
     summary = summarize(rows, spec, elapsed)
-    summary.update({"peak_queue": peak_queue, "policy_changes": policy_changes})
+    summary.update({"peak_queue": peak_queue, "policy_changes": policy_changes,
+                    "mean_backend_utilization": {bid: busy_area[bid]/max(.000001,capacity_area[bid]) for bid in nodes},
+                    "mean_backend_queue": {bid: queue_area[bid]/max(.000001,current-spec.warmup) for bid in nodes}})
+    recovery = []
+    for fault in spec.faults:
+        if fault.kind == "restore":
+            first = next((r for r in sorted(rows,key=lambda row: row["completed"])
+                          if r["backend"] == fault.backend and r["status"] == "ok"
+                          and r["arrival"] >= fault.at),None)
+            recovery.append({"backend":fault.backend,"restore_at":fault.at,
+                             "first_success_seconds":first["completed"]-fault.at if first else None})
+    summary["recovery"] = recovery
     for stats in shadow_stats.values():
         count = max(1, stats["samples"])
         stats["disagreement_rate"] = stats["disagreements"]/count
@@ -291,7 +311,12 @@ def ranking(runs: list[dict], objective: str) -> list[dict]:
         metric = {"latency": "p99_ms", "throughput": "successful_rps",
                   "reliability": "error_rate", "balanced": "slo_violation_rate"}[objective]
         values = [s[metric] for s in samples]
+        deviation = statistics.stdev(values) if len(values)>1 else None
+        # Two-sided Student t interval; n is bounded to 1..5. No interval for n=1.
+        t_critical = {2:12.706,3:4.303,4:3.182,5:2.776}.get(len(values))
+        mean = statistics.mean(values)
+        margin = t_critical*deviation/math.sqrt(len(values)) if t_critical and deviation is not None else None
         result.append({"algorithm": algorithm, "metric": metric,
-                       "mean": statistics.mean(values), "repetitions": len(values),
-                       "sample_stdev": statistics.stdev(values) if len(values)>1 else None})
+                       "mean": mean, "repetitions": len(values), "sample_stdev": deviation,
+                       "ci95": [mean-margin,mean+margin] if margin is not None else None})
     return sorted(result, key=lambda r: r["mean"], reverse=objective=="throughput")

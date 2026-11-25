@@ -58,8 +58,8 @@ class ExperimentManager:
             job.state = "running"
             for i in range(job.spec.repetitions):
                 for algorithm in job.spec.algorithms:
-                    async def progress(frame: dict) -> None:
-                        job.progress = {"algorithm":algorithm,"repetition":i+1,**frame}
+                    async def progress(frame: dict, name: str = algorithm, repetition: int = i+1) -> None:
+                        job.progress = {"algorithm":name,"repetition":repetition,**frame}
                         await job.gate.wait()
                         await asyncio.sleep(0)
                     runner = simulate if job.spec.mode == "simulation" else run_http

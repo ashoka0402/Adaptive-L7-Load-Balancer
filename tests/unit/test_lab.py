@@ -81,3 +81,20 @@ async def test_cancel_and_replay_lifecycle():
     assert second.state=="completed"
     assert len(second.runs)==len(spec.algorithms)
     await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_persisted_result_can_be_loaded_and_replayed(tmp_path):
+    from app.persistence.sqlite import SQLiteStore
+
+    store=SQLiteStore(tmp_path/"experiments.db")
+    store.initialize()
+    manager=ExperimentManager(store)
+    job=manager.start(ExperimentSpec(rps=10,duration=.4,algorithms=["round_robin"]))
+    await asyncio.wait_for(job.task,timeout=10)
+    saved=store.get_experiment(job.id)
+    assert saved is not None and saved["state"]=="completed"
+    assert store.recent_experiments()[0]["id"]==job.id
+    replay=manager.start(ExperimentSpec.model_validate(saved["spec"]))
+    await asyncio.wait_for(replay.task,timeout=10)
+    assert replay.runs==saved["runs"]

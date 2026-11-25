@@ -36,6 +36,7 @@ async def listener(app: web.Application, stack: AsyncExitStack) -> int:
 async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Progress) -> dict:
     from app.server import LoadBalancerApp
 
+    cpu_started = time.process_time()
     rows: list[dict] = []
     timeline: list[dict] = []
     nodes = {n.id: Node(n, Backend(n.id, "127.0.0.1", 1), n.capacity,
@@ -135,6 +136,8 @@ async def run_http(spec: ExperimentSpec, algorithm: str, seed: int, progress: Pr
                 await asyncio.gather(fault_task,*tasks,return_exceptions=True)
             elapsed=max(.000001,time.monotonic()-start-spec.warmup)
     rows.sort(key=lambda r:r["id"])
-    return {"algorithm":algorithm,"seed":seed,"mode":"http","summary":summarize(rows,spec,elapsed),
+    summary = summarize(rows,spec,elapsed)
+    summary["process_cpu_seconds"] = time.process_time()-cpu_started
+    return {"algorithm":algorithm,"seed":seed,"mode":"http","summary":summary,
             "timeline":timeline,"requests":rows,"shadow":{},
-            "note":"Measured local HTTP; synthetic application faults; no external targets."}
+            "note":"Measured local HTTP; synthetic application faults; no external targets. CPU includes whole process, setup and teardown."}

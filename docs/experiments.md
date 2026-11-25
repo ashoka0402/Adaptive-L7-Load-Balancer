@@ -30,11 +30,15 @@ policy's state and outcomes; this is not an independent counterfactual trajector
 Arena uses repeated identical seeded traces and separate runtime state. Reports
 include success rate, offered/successful RPS, latency percentiles, drops, timeouts,
 SLO violations, distribution, fairness, peak simulated queue and policy changes.
-Ranking uses one configured objective and descriptive sample standard deviation.
-No benchmark winner is assumed; confidence intervals, resource profiling and formal
-recovery time estimation remain future work. The real HTTP mode has wall-clock
+Ranking uses one configured objective, descriptive sample standard deviation and
+an approximate Student t interval over repeated runs (independence/normality are not established).
+Simulation also reports time-weighted queue/utilization and first successful request after restore.
+HTTP reports whole-process CPU time (not isolated proxy overhead). No benchmark winner is assumed;
+resource profiling and formal recovery time estimation remain future work. The real HTTP mode has wall-clock
 scheduling variation, synthetic application faults and shared process-level metrics;
 it is not a controlled deployment performance claim.
 
 Use GitHub Actions "Pulse verification" for actual pytest, coverage, lint and type
 check outcomes. No test or benchmark results are fabricated.
+
+Run `python -m benchmarks.run_arena --spec experiment.json --output arena.json` or omit `--spec` for the default comparison. CI executes the default simulation and uploads actual result JSON alongside the test reports.

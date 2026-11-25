@@ -92,7 +92,7 @@ class ExperimentSpec(StrictModel):
             if any(not 0 <= t <= self.duration + self.warmup or not .1 <= m <= 4
                    for t, m in self.rate_schedule):
                 raise ValueError("invalid custom schedule")
-            if sorted(set(t for t, _ in self.rate_schedule)) != [t for t, _ in self.rate_schedule]:
+            if sorted({t for t, _ in self.rate_schedule}) != [t for t, _ in self.rate_schedule]:
                 raise ValueError("schedule times must be unique and ascending")
         bound = min(self.total_requests or 20000, int((self.duration + self.warmup) * self.rps * 4) + 1)
         if bound * self.repetitions * len(self.algorithms) > 80000:
