@@ -152,3 +152,28 @@ Chaos controls are intended only for the bundled sample backends.
 
 Repository:
 https://github.com/ashoka0402/Adaptive-L7-Load-Balancer
+
+9. CAPACITY-BASED CHAOS AND AUTOMATIC SCALING
+--------------------------------------------
+Open Traffic Control Center > Capacity & Overload Lab.
+  a. Stop traffic; click Apply 25 / 50 / 80 req/s preset.
+  b. Select individual backends to edit service starts/sec, concurrent
+     work, queue slots, recovery interval, and optional failure policy.
+  c. Click Traffic Tsunami (280 offered req/s for 45 seconds) or one
+     of the other traffic scenarios. Observe real queues and HTTP 503s.
+  d. To test overload-induced service outages, apply the failure preset
+     and run Cascading Overload. Actual cascading behavior is measured,
+     not guaranteed. Recover capacity failures to clear cooldowns.
+  e. Enable autoscaling to recruit prestarted standby backend-4 through
+     backend-6 when pressure persists. Quiet replicas are drained and
+     removed from the routing pool; containers remain running.
+  f. For comparison, stop traffic, disable scaling or let it settle,
+     set traffic rate/duration/concurrency/pattern, then click Run measured
+     comparison. It runs Round Robin and EWMA on the same fixed pool.
+     Export comparison JSON for evidence. Avoid other traffic during runs.
+  g. Stop traffic and restore normal settings after testing.
+
+The capacity gate enforces a paced service-start rate, bounded FIFO queue,
+concurrency and a 2-second queue wait deadline. A failed service is a
+controlled timed outage, not an uncontrolled machine crash. Generator
+drops and origin rejection counts are different metrics.

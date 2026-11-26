@@ -14,6 +14,8 @@ services:
       - backend-3
     environment:
       - PYTHONUNBUFFERED=1
+      - PULSE_SAMPLE_CLUSTER=1
+      - PULSE_BENCHMARK_TOKEN=${PULSE_BENCHMARK_TOKEN:-pulse-compose-local-workload}
     command: ["python", "-m", "app.main", "--config", "config/live.docker.json", "--host", "0.0.0.0"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/pulse/"]
@@ -55,6 +57,39 @@ services:
       - "8003"
     restart: unless-stopped
 
+  backend-4:
+    build:
+      context: .
+      dockerfile: backends/Dockerfile
+    environment:
+      PULSE_BENCHMARK_TOKEN: ${PULSE_BENCHMARK_TOKEN:-pulse-compose-local-workload}
+    command: ["python", "-m", "backends.workload", "--host", "0.0.0.0", "--port", "8004", "--id", "backend-4"]
+    expose:
+      - "8004"
+    restart: unless-stopped
+
+  backend-5:
+    build:
+      context: .
+      dockerfile: backends/Dockerfile
+    environment:
+      PULSE_BENCHMARK_TOKEN: ${PULSE_BENCHMARK_TOKEN:-pulse-compose-local-workload}
+    command: ["python", "-m", "backends.workload", "--host", "0.0.0.0", "--port", "8005", "--id", "backend-5"]
+    expose:
+      - "8005"
+    restart: unless-stopped
+
+  backend-6:
+    build:
+      context: .
+      dockerfile: backends/Dockerfile
+    environment:
+      PULSE_BENCHMARK_TOKEN: ${PULSE_BENCHMARK_TOKEN:-pulse-compose-local-workload}
+    command: ["python", "-m", "backends.workload", "--host", "0.0.0.0", "--port", "8006", "--id", "backend-6"]
+    expose:
+      - "8006"
+    restart: unless-stopped
+
   traffic-center:
     build:
       context: .
@@ -67,6 +102,9 @@ services:
     command: ["uvicorn", "app.fastapi_lb.traffic:app", "--host", "0.0.0.0", "--port", "8081", "--no-access-log"]
     depends_on:
       - load-balancer
+      - backend-4
+      - backend-5
+      - backend-6
     restart: unless-stopped
 
   prometheus:

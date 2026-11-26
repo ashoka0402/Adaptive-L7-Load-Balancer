@@ -79,3 +79,13 @@ In the Traffic Control Center, choose one bundled sample backend and inject a ti
 ## Quick start instructions
 
 See [START_HERE.txt](START_HERE.txt) for the complete startup, two-dashboard walkthrough, adaptive-routing demonstration, Chaos Mode controls, shutdown and troubleshooting instructions.
+
+### Capacity-based overload lab
+
+The Traffic Control Center now supports origin-side FIFO admission, paced service starts, maximum concurrent work, bounded waiting queues and a two-second queue deadline. Limits are disabled initially to preserve normal live workloads; apply the 25/50/80 req/s heterogeneous preset (standby nodes use 80), optionally enabling timed overload outages. Requests that cannot enter or finish waiting receive real 503 responses. Sustained queue pressure or repeated rejection can make the origin's health endpoint return 503 until its cooldown expires. This is deliberately controlled service failure, not an OS/container crash. CPU work and manual fault injection remain separate.
+
+Traffic Spike, Ramp to Failure, Traffic Tsunami, Bursty Traffic, Cascading Overload and Recovery Test send real HTTP requests with different arrival profiles (bounded at 280 offered requests/sec for 45 seconds). Cascading failure is an experimental outcome, not guaranteed: use the failure preset and observe actual results. The controller displays each origin's measured starts, arrivals, queue depth, active work, rejection/failure counters and rolling utilization graph. Generator drops are distinct from origin rejection counts; retries can make origin attempts exceed client requests.
+
+Autoscaling recruits up to three prestarted independent standby containers after sustained pressure, then drains/removes them from the routing pool when quiet. It does not provision or terminate containers, mount the Docker socket, or expose a public registration API. All six sample services start with traffic-center, three are in the initial routing pool. Capacity settings never enter the EWMA strategy; only the controller's scaling policy reads them. Standby limits are independently configurable. A token-protected internal cluster endpoint accepts only fixed standby IDs and known strategies.
+
+Run measured comparison after applying a preset. Both algorithms use the current traffic controls, fixed pool membership, identical capacity settings, clean fault/CPU state, and no autoscaling. Results include client latency, goodput, losses, origin rejections and failure counts, and can be exported as JSON. One run per strategy is exploratory evidence; repeat experiments for robust results. Do not send unrelated requests or change routing while comparing. No benchmark outcomes are prefilled.

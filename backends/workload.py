@@ -11,6 +11,8 @@ import sqlite3
 
 from aiohttp import web
 
+from backends.capacity import Capacity, CapacityGate
+
 
 def create_workload(backend_id: str, benchmark_token: str = "") -> web.Application:
     db = sqlite3.connect(":memory:")
@@ -18,6 +20,7 @@ def create_workload(backend_id: str, benchmark_token: str = "") -> web.Applicati
     db.executemany("INSERT INTO items VALUES(?,?,?)",
                    [(i, f"Item {i}", i*3) for i in range(1,101)])
     db.commit()
+    gate = CapacityGate()
     iterations = 1000
     fault = 'normal'
     fault_until = 0.0
@@ -27,11 +30,20 @@ def create_workload(backend_id: str, benchmark_token: str = "") -> web.Applicati
         return fault if time.monotonic() < fault_until else 'normal'
 
     async def health(request: web.Request) -> web.Response:
-        if active_fault() == "offline":
+        if active_fault() == "offline" or gate.failed():
             return web.json_response({"status":"unavailable","backend":backend_id},status=503)
         return web.json_response({"status":"ok","backend":backend_id})
 
     async def item(request: web.Request) -> web.Response:
+        if not await gate.acquire():
+            return web.Response(status=503, text="Origin capacity exceeded",
+                                headers={"Retry-After":"1"})
+        try:
+            return await admitted_item(request)
+        finally:
+            await gate.release()
+
+    async def admitted_item(request: web.Request) -> web.Response:
         nonlocal fault_count
         mode = active_fault()
         fault_count += 1
@@ -94,6 +106,31 @@ def create_workload(backend_id: str, benchmark_token: str = "") -> web.Applicati
         return web.json_response({"mode":active_fault(),
             "remaining":round(max(0,fault_until-time.monotonic()),1)})
 
+    async def capacity(request: web.Request) -> web.Response:
+        if not benchmark_token or not hmac.compare_digest(
+            request.headers.get("X-Benchmark-Token",""),benchmark_token
+        ):
+            raise web.HTTPNotFound()
+        if request.method == "POST":
+            try:
+                data = await request.json()
+                if not isinstance(data,dict):
+                    raise ValueError()
+                if data.get("recover") is True:
+                    await gate.recover()
+                else:
+                    config = Capacity(**data)
+                    if (type(config.enabled) is not bool or type(config.crash) is not bool
+                        or type(config.rate) is not int or not 5 <= config.rate <= 500
+                        or type(config.concurrency) is not int or not 1 <= config.concurrency <= 64
+                        or type(config.queue) is not int or not 0 <= config.queue <= 64
+                        or type(config.cooldown) is not int or not 3 <= config.cooldown <= 60):
+                        raise ValueError()
+                    await gate.configure(config)
+            except (TypeError,ValueError):
+                raise web.HTTPBadRequest()
+        return web.json_response(gate.snapshot())
+
     async def cleanup(app: web.Application) -> None:
         db.close()
 
@@ -105,6 +142,8 @@ def create_workload(backend_id: str, benchmark_token: str = "") -> web.Applicati
     if benchmark_token:
         app.router.add_post("/__benchmark/complexity", complexity)
         app.router.add_get("/__benchmark/chaos", chaos)
+        app.router.add_get("/__benchmark/capacity", capacity)
+        app.router.add_post("/__benchmark/capacity", capacity)
         app.router.add_post("/__benchmark/chaos", chaos)
     app.on_cleanup.append(cleanup)
     return app

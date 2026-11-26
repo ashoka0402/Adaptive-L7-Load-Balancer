@@ -4,13 +4,25 @@
 :root{color-scheme:dark;--bg:#0d1b1d;--panel:#13282b;--line:#294244;--text:#ece8d7;--muted:#a1b2ad;--gold:#d3aa54;--green:#80bd98;--red:#e58b79}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 ui-monospace,Consolas,monospace}header,main{max-width:1440px;margin:auto;padding:20px 24px}header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;border-bottom:1px solid var(--line)}h1,h2{font:500 25px Georgia,serif;margin:0 0 8px}h1 strong{color:var(--gold)}h2{font-size:21px}p,small{color:var(--muted)}p{margin:4px 0 16px}a{color:var(--gold)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:20px;min-width:0}.wide{grid-column:1/-1}.fields{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px}.fields label{flex:1;min-width:115px;display:grid;gap:6px;color:var(--muted);font-size:12px}input,select,button{background:#193639;border:1px solid var(--line);border-radius:6px;color:var(--text);font:inherit;padding:9px 12px;min-width:0}button{cursor:pointer}button.primary{background:var(--gold);color:#18211d;font-weight:700}button:disabled{opacity:.45;cursor:not-allowed}button:focus-visible,a:focus-visible{outline:2px solid var(--gold)}.actions{display:flex;gap:10px;flex-wrap:wrap}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}.stat{padding:14px;border:1px solid var(--line);border-radius:8px}.stat b{font:500 28px Georgia,serif;display:block}.stat small{font-size:10px;text-transform:uppercase}.meter{height:9px;background:#284043;border-radius:5px;overflow:hidden}.meter i{display:block;height:100%;background:var(--gold)}.row{display:flex;justify-content:space-between;gap:8px;margin:10px 0 5px}.scroll{overflow-x:auto;max-height:340px}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line);font-size:12px}th{color:var(--muted)}canvas{width:100%;height:210px;display:block}.notice{color:var(--red);min-height:20px;margin-top:10px}#state{color:var(--gold)}@media(max-width:760px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}header,main{padding:14px}.card{padding:14px}}
 </style></head><body><header><div><h1><strong>Pulse.</strong> Traffic Control Center</h1><small>Independent HTTP client · actual network requests</small></div><div><a id="monitor" href="http://localhost:8080/pulse/" target="_blank" rel="noopener">Open live monitor ↗</a></div></header>
-<main><div class="grid"><section class="card"><h2>Generate traffic</h2><p>Send real GET requests to the sample application's SQLite-backed item API. No fake metrics or direct telemetry updates.</p><div class="fields"><label>Requests / sec<input id="rate" type="number" min="1" max="300" value="40"></label><label>Duration (seconds)<input id="duration" type="number" min="5" max="120" value="60"></label><label>Max concurrency<input id="concurrency" type="number" min="1" max="64" value="32"></label><label>Pattern<select id="pattern"><option value="constant">Constant</option><option value="ramp">Gradual ramp</option><option value="burst">Recurring bursts</option></select></label></div><div class="actions"><button class="primary" id="start">Start real traffic</button><button id="stop">Stop</button></div><div class="notice" id="notice" role="status"></div><span id="state">Connecting</span><div class="meter"><i id="progress" style="width:0%"></i></div></section>
-<section class="card"><h2>Adaptive routing experiment</h2><p>While traffic is running, increase a backend's actual CPU computation. It stays online. Watch Pulse independently shift requests away, then restore the workload to test recovery.</p><div class="fields"><label>Sample backend<select id="backend"><option>backend-1</option><option selected>backend-2</option><option>backend-3</option></select></label><label>Compute workload<select id="work"><option value="50000">50k iterations</option><option value="100000">100k iterations</option><option value="200000" selected>200k iterations</option><option value="300000">300k iterations</option></select></label></div><div class="actions"><button id="slow">Increase CPU work</button><button id="restore">Restore normal work</button></div><div id="workStatus" style="margin-top:12px"></div></section>
+<main><div class="grid"><section class="card"><h2>Generate traffic</h2><p>Send real GET requests to the sample application's SQLite-backed item API. No fake metrics or direct telemetry updates.</p><div class="fields"><label>Requests / sec<input id="rate" type="number" min="1" max="300" value="40"></label><label>Duration (seconds)<input id="duration" type="number" min="5" max="120" value="60"></label><label>Max concurrency<input id="concurrency" type="number" min="1" max="64" value="32"></label><label>Pattern<select id="pattern"><option value="constant">Constant</option><option value="ramp">Gradual ramp</option><option value="burst">Recurring bursts</option><option value="spike">Traffic spike</option><option value="tsunami">Traffic tsunami</option><option value="cascade">Cascading overload</option><option value="recovery">Recovery test</option></select></label></div><div class="actions"><button class="primary" id="start">Start real traffic</button><button id="stop">Stop</button></div><div class="notice" id="notice" role="status"></div><span id="state">Connecting</span><div class="meter"><i id="progress" style="width:0%"></i></div></section>
+<section class="card"><h2>Adaptive routing experiment</h2><p>While traffic is running, increase a backend's actual CPU computation. It stays online. Watch Pulse independently shift requests away, then restore the workload to test recovery.</p><div class="fields"><label>Sample backend<select id="backend"><option>backend-1</option><option selected>backend-2</option><option>backend-3</option><option>backend-4</option><option>backend-5</option><option>backend-6</option></select></label><label>Compute workload<select id="work"><option value="50000">50k iterations</option><option value="100000">100k iterations</option><option value="200000" selected>200k iterations</option><option value="300000">300k iterations</option></select></label></div><div class="actions"><button id="slow">Increase CPU work</button><button id="restore">Restore normal work</button></div><div id="workStatus" style="margin-top:12px"></div></section>
 <section class="card wide"><h2>Chaos Mode <small style="font:12px ui-monospace;color:var(--gold)">LIVE FAULT INJECTION</small></h2>
 <p>Inject real HTTP failures into a selected sample application. Pulse receives no fault commands: it must react to health checks, response errors and transport failures. Faults expire automatically; the offline case is a service-level outage, not a stopped container.</p>
-<div class="fields"><label>Target backend<select id="chaosBackend"><option>backend-1</option><option selected>backend-2</option><option>backend-3</option></select></label><label>Auto-recovery (seconds)<select id="chaosDuration"><option>10</option><option selected>30</option><option>60</option><option>120</option></select></label></div>
+<div class="fields"><label>Target backend<select id="chaosBackend"><option>backend-1</option><option selected>backend-2</option><option>backend-3</option><option>backend-4</option><option>backend-5</option><option>backend-6</option></select></label><label>Auto-recovery (seconds)<select id="chaosDuration"><option>10</option><option selected>30</option><option>60</option><option>120</option></select></label></div>
 <div class="actions" id="chaosActions"><button data-fault="offline">Take offline (503 + health fail)</button><button data-fault="unavailable">Return 503 (healthy probe)</button><button data-fault="error">Return HTTP 500</button><button data-fault="flaky">Intermittent 500s</button><button data-fault="timeout">Request timeout</button><button data-fault="disconnect">Drop connection</button><button data-fault="normal">Recover selected</button><button id="chaosReset" class="primary">Recover all</button></div>
 <div class="notice" id="chaosNotice" role="status"></div><div id="chaosStatus" class="stats"></div><h2 style="font-size:17px">Fault timeline</h2><div id="chaosEvents" class="scroll"><small>No faults injected yet.</small></div></section>
+<section class="card wide" id="capacityLab"><h2>Capacity &amp; Overload Lab <small style="font:12px ui-monospace;color:var(--gold)">REAL HTTP · ENFORCED LIMITS</small></h2>
+<p>Set origin-side service limits, not CPU delays. Real requests queue, get rejected or trigger a timed outage. Pulse only sees actual HTTP responses, latency and health checks. Three standby containers can join the live pool.</p>
+<div class="actions"><button id="capPreset">Apply 25 / 50 / 80 req/s preset</button><button id="capCrashPreset">Apply preset + overload failure</button><button id="capRecover">Recover capacity failures</button><button id="capAuto">Enable autoscaling</button></div>
+<div class="fields" style="margin-top:16px"><label>Backend<select id="capBackend"><option>backend-1</option><option>backend-2</option><option>backend-3</option><option>backend-4</option><option>backend-5</option><option>backend-6</option></select></label><label>Service starts / sec<input id="capRate" type="number" min="5" max="500" value="40"></label><label>Max active<input id="capConcurrency" type="number" min="1" max="64" value="8"></label><label>Queue slots<input id="capQueue" type="number" min="0" max="64" value="12"></label><label>Recovery seconds<input id="capCooldown" type="number" min="3" max="60" value="10"></label></div>
+<div class="actions"><label><input type="checkbox" id="capEnabled" checked> Enforce limits</label><label><input type="checkbox" id="capCrash"> Fail under sustained overload</label><button class="primary" id="capApply">Apply backend limits</button></div>
+<div class="notice" id="capNotice" role="status"></div><div id="capCluster" class="row"></div>
+<div class="scroll"><table><thead><tr><th>Backend</th><th>Membership</th><th>State</th><th>Incoming / service rate</th><th>Active / queue</th><th>Rejected</th><th>Failures</th><th>Queue wait EWMA</th></tr></thead><tbody id="capRows"></tbody></table></div>
+<h2 style="margin-top:18px;font-size:18px">Selected backend · capacity utilization</h2><canvas id="capGraph" role="img" aria-label="Incoming requests, service starts and configured capacity over time"></canvas><small>Gold: incoming requests · Green: service starts · Dashed: configured service-start limit. The chart shows measured one-second counts, not CPU utilization.</small>
+<h2 style="margin-top:18px;font-size:18px">Overload scenarios</h2><p>One-click local tests use up to 280 offered req/s, 64 concurrent requests and 45 seconds. Apply a capacity preset first. Cascading overload needs failure policy enabled to trigger timed outages.</p>
+<div class="actions" id="capScenarios"><button data-scenario="spike">Traffic Spike</button><button data-scenario="ramp">Ramp to Failure</button><button data-scenario="tsunami">Traffic Tsunami</button><button data-scenario="burst">Bursty Traffic</button><button data-scenario="cascade">Cascading Overload</button><button data-scenario="recovery">Recovery Test</button><button id="capStop">Stop traffic / comparison</button></div>
+<h2 style="margin-top:18px;font-size:18px">Round Robin vs EWMA</h2><p>Uses the current rate, duration, concurrency and pattern above; same active backends and capacity limits for both runs. Automatically restores normal CPU/fault settings before each run. No autoscaling during comparison. Do not send other traffic or change strategy in Pulse during the test.</p><div class="actions"><button id="capCompare">Run measured comparison</button><button id="capExport">Export comparison JSON</button></div><div id="capCompareState" class="row"></div><div class="scroll"><table><thead><tr><th>Algorithm</th><th>Success / offered</th><th>Goodput</th><th>p95</th><th>Client errors</th><th>Generator drops</th><th>Origin rejections</th><th>Origin failures</th></tr></thead><tbody id="capCompareRows"></tbody></table></div>
+<h2 style="margin-top:18px;font-size:18px">Scaling &amp; capacity timeline</h2><div id="capEvents" class="scroll"></div></section>
 <section class="card wide"><h2>Actual client measurements</h2><div class="stats" id="stats"></div><canvas id="chart" role="img" aria-label="Offered requests versus successful responses per second"></canvas><small>Gold: offered requests · Green: completed successful responses in each second. Late responses can cross interval boundaries.</small></section>
 <section class="card"><h2>Successful responses by backend</h2><p>Whole run · measured from the response header.</p><div id="shares"></div></section><section class="card"><h2>Recent HTTP responses</h2><div class="scroll"><table><thead><tr><th>Request</th><th>HTTP</th><th>Backend</th><th>Latency</th></tr></thead><tbody id="recent"></tbody></table></div></section></div></main>
 <script>
@@ -35,6 +47,72 @@ async function chaosAction(path,body){
 }
 for(const button of document.querySelectorAll('[data-fault]'))button.onclick=()=>chaosAction('chaos',{backend:$('chaosBackend').value,mode:button.dataset.fault,duration:Number($('chaosDuration').value)});
 $('chaosReset').onclick=()=>chaosAction('chaos/reset',{});
+let capacityBusy=false,capCurrent=null;
+function capacityNotice(msg){$('capNotice').textContent=msg}
+async function capacityAction(path,body){
+ if(capacityBusy)return;capacityBusy=true;
+ try{await call(path,body);capacityNotice('');await refresh()}
+ catch(e){capacityNotice(e.message)}
+ finally{capacityBusy=false}
+}
+function trafficOptions(){return {rate:Number($('rate').value),duration:Number($('duration').value),concurrency:Number($('concurrency').value),pattern:$('pattern').value}}
+function fillCapacity(){
+ const s=capCurrent?.states?.[$('capBackend').value];
+ if(!s||s.state==='unknown')return;
+ $('capRate').value=s.rate;$('capConcurrency').value=s.concurrency;$('capQueue').value=s.queue;$('capCooldown').value=s.cooldown;$('capEnabled').checked=s.enabled;$('capCrash').checked=s.crash;
+}
+$('capBackend').onchange=()=>{fillCapacity();capacityGraph()};
+$('capApply').onclick=()=>capacityAction('capacity',{backend:$('capBackend').value,enabled:$('capEnabled').checked,rate:Number($('capRate').value),concurrency:Number($('capConcurrency').value),queue:Number($('capQueue').value),crash:$('capCrash').checked,cooldown:Number($('capCooldown').value)});
+$('capPreset').onclick=async()=>{await capacityAction('capacity/preset',{crash:false});fillCapacity()};
+$('capCrashPreset').onclick=async()=>{await capacityAction('capacity/preset',{crash:true});fillCapacity()};
+$('capRecover').onclick=()=>capacityAction('capacity/recover',{});
+$('capAuto').onclick=()=>capacityAction('capacity/auto',{enabled:!capCurrent?.auto});
+$('capStop').onclick=()=>capacityAction('stop',{});
+$('capCompare').onclick=()=>capacityAction('capacity/compare',trafficOptions());
+$('capExport').onclick=()=>{const blob=new Blob([JSON.stringify(capCurrent.comparison,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='pulse-capacity-comparison.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+document.querySelectorAll('[data-scenario]').forEach(b=>b.onclick=()=>{
+ if(!capCurrent?.members.some(id=>capCurrent.states[id]?.enabled)){capacityNotice('Apply a capacity preset first.');return}
+ const pattern=b.dataset.scenario;
+ if(pattern==='cascade'&&!capCurrent.members.some(id=>capCurrent.states[id]?.crash)){capacityNotice('Enable overload failure or apply the failure preset first.');return}
+ $('rate').value=280;$('duration').value=45;$('concurrency').value=64;$('pattern').value=pattern;
+ capacityAction('start',trafficOptions());
+});
+function capacityGraph(){
+ const rows=capCurrent?.history?.[$('capBackend').value]||[],c=$('capGraph'),w=c.clientWidth,h=c.clientHeight,d=window.devicePixelRatio||1;if(!w||!h)return;
+ c.width=w*d;c.height=h*d;const x=c.getContext('2d');x.scale(d,d);
+ const l=44,r=w-12,t=12,b=h-26,max=Math.max(10,...rows.flatMap(v=>[v.incoming,v.started,v.enabled?v.rate:0]));
+ x.font='10px monospace';x.textAlign='right';
+ for(let i=0;i<=4;i++){const y=b-(b-t)*i/4;x.strokeStyle='#294244';x.beginPath();x.moveTo(l,y);x.lineTo(r,y);x.stroke();x.fillStyle='#a1b2ad';x.fillText(Math.round(max*i/4),l-6,y+3)}
+ for(const [key,color,dash] of [['incoming','#d3aa54',[]],['started','#80bd98',[]],['rate','#a1b2ad',[4,4]]]){
+   x.strokeStyle=color;x.lineWidth=2;x.setLineDash(dash);x.beginPath();let started=false;
+   rows.forEach((v,i)=>{if(key==='rate'&&!v.enabled){started=false;return}const px=l+(r-l)*i/Math.max(1,rows.length-1),py=b-(b-t)*v[key]/max;started?x.lineTo(px,py):x.moveTo(px,py);started=true});x.stroke()
+ }
+ x.setLineDash([]);x.fillStyle='#a1b2ad';x.textAlign='left';x.fillText('Earlier',l,h-6);x.textAlign='right';x.fillText('Now',r,h-6);
+}
+function renderCapacity(s){
+ const cap=s.capacity;if(!cap)return;const first=!capCurrent||!capCurrent.states[$('capBackend').value]||capCurrent.states[$('capBackend').value].state==='unknown';capCurrent=cap;if(first)fillCapacity();
+ const locked=cap.comparing,available=cap.available;
+ $('capCluster').textContent=(available?'Live cluster · '+cap.members.length+' / 6 active · '+cap.strategy:'Waiting for sample cluster')+' · autoscaling '+(cap.auto?'enabled':'disabled');
+ $('capAuto').textContent=cap.auto?'Disable autoscaling':'Enable autoscaling';
+ for(const id of ['capPreset','capCrashPreset','capCompare'])$(id).disabled=!available||s.running||locked;
+ for(const id of ['capApply','capRecover','capAuto'])$(id).disabled=!available||locked;
+ $('capStop').disabled=!s.running&&!locked;$('capExport').disabled=!cap.comparison.length;
+ for(const btn of document.querySelectorAll('[data-scenario]'))btn.disabled=!available||s.running||locked;
+ $('start').disabled=s.running||locked;$('stop').disabled=!s.running&&!locked;
+ if(locked){$('slow').disabled=$('restore').disabled=true;for(const btn of $('chaosActions').querySelectorAll('button'))btn.disabled=true}
+ const rows=$('capRows');rows.replaceChildren();
+ for(const [name,v] of Object.entries(cap.states)){
+  const tr=node('tr','');const member=cap.members.includes(name);
+  for(const text of [name,member?'Active pool':'Standby',v.state+(v.remaining>0?' · '+Math.ceil(v.remaining)+'s':''),(v.incoming_rps??'—')+' / '+(v.started_rps??'—')+' / '+(v.enabled?v.rate:'unlimited'),(v.active??'—')+' / '+(v.queued??'—'),v.rejected??'—',v.failures??'—',(v.queue_wait_ms??'—')+' ms'])tr.append(node('td',String(text)));
+  if(v.state==='failed'||v.state==='overloaded')tr.style.color='var(--red)';rows.append(tr)
+ }
+ $('capCompareState').textContent='Comparison: '+cap.comparisonState;
+ const cr=$('capCompareRows');cr.replaceChildren();
+ for(const entry of cap.comparison){const v=entry.result,origins=Object.values(entry.origins);const tr=node('tr','');
+  for(const text of [entry.strategy,v.success+' / '+v.offered,v.goodput+' req/s',v.p95+' ms',v.errors,v.dropped,origins.reduce((a,b)=>a+b.rejected,0),origins.reduce((a,b)=>a+b.failures,0)])tr.append(node('td',String(text)));cr.append(tr)}
+ $('capEvents').replaceChildren(...[...cap.events].reverse().map(e=>node('div',new Date(e.ts*1000).toLocaleTimeString()+' · '+e.message,'row')));
+ capacityGraph();
+}
 function node(tag,text,cls){const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n}
 function graph(rows){
  const c=$('chart'),w=c.clientWidth,h=c.clientHeight,d=window.devicePixelRatio||1;if(!w||!h)return;
@@ -68,7 +146,8 @@ function render(s){
  if(!total)shares.append(node('small','Waiting for responses'));
  const recent=$('recent');recent.replaceChildren();for(const r of [...s.recent].reverse()){const tr=node('tr','');for(const v of [r.id,r.status||'Transport error',r.backend||'—',r.ms+' ms'])tr.append(node('td',String(v)));recent.append(tr)}
  graph(s.history);
+ renderCapacity(s);
 }
 let polling=false;async function refresh(){if(polling)return;polling=true;try{render(await call('status'))}catch(e){notice(e.message)}finally{polling=false}}
-window.addEventListener('resize',()=>current&&graph(current.history));refresh();setInterval(refresh,700);
+window.addEventListener('resize',()=>{if(current)graph(current.history);capacityGraph()});refresh();setInterval(refresh,700);
 </script></body></html>

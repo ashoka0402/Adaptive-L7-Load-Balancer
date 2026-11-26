@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import hmac
 import os
 import re
 import time
@@ -27,6 +28,13 @@ LOCAL_HOST = re.compile(r"(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?", re.I)
 SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")
 DASHBOARD = Path(__file__).with_name("dashboard.html")
 DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "config/live.local.json"
+
+
+class ClusterOptions(BaseModel):
+    action: Literal["add","remove","strategy"]
+    backend: Literal["backend-4","backend-5","backend-6"] | None = None
+    strategy: str | None = None
+    reset: bool = False
 
 
 class LoadOptions(BaseModel):
@@ -135,6 +143,8 @@ def create_app(
         raise ValueError("Lab does not accept external destinations")
     routes = {"/": Pool([], "latency_aware")} if lab else configured_routes(config or str(DEFAULT_CONFIG))
     primary = next(iter(routes.values()))
+    cluster_token = os.getenv('PULSE_BENCHMARK_TOKEN','') if os.getenv('PULSE_SAMPLE_CLUSTER') == '1' and not lab else ''
+    standby = {f'backend-{i}': Backend(f'backend-{i}', f'http://backend-{i}:{8000+i}') for i in range(4,7)} if cluster_token else {}
     if strategy:
         if strategy not in STRATEGIES:
             raise ValueError("unknown strategy")
@@ -473,6 +483,72 @@ def create_app(
     async def traces(request: Request):
         local(request)
         return {"traces": list(reversed(telemetry.traces))}
+
+    def internal_cluster(request: Request) -> None:
+        if (not cluster_token or request.headers.get("host") != "load-balancer:8080"
+                or request.headers.get("origin") is not None
+                or request.headers.get("sec-fetch-site") is not None
+                or not hmac.compare_digest(request.headers.get("x-benchmark-token",""),cluster_token)):
+            raise HTTPException(403,"Internal sample cluster only")
+
+    @app.get("/pulse/internal/cluster")
+    async def cluster_status(request: Request):
+        internal_cluster(request)
+        return {"strategy":primary.strategy,"members":[b.id for b in primary.backends],
+                "standby":list(standby),"active":sum(b.active for b in primary.backends)}
+
+    @app.post("/pulse/internal/cluster")
+    async def cluster_change(request: Request, options: ClusterOptions):
+        internal_cluster(request)
+        async with add_lock:
+            if options.action == "strategy":
+                if options.strategy not in STRATEGIES:
+                    raise HTTPException(422,"Valid strategy required")
+                if options.reset and any(b.active for b in primary.backends):
+                    raise HTTPException(409,"Drain requests first")
+                primary.strategy = options.strategy
+                if options.reset:
+                    primary.cursor = primary.selections = 0
+                    for b in primary.backends:
+                        b.ewma = 0
+                        b.last_selected = 0
+                        b.open_until = 0
+                        b.failures = 0
+                        b.probing = False
+                telemetry.event(f"Strategy: {primary.strategy}")
+            elif options.action == "add":
+                b = standby.get(options.backend or "")
+                if b is None:
+                    raise HTTPException(422,"Unknown standby")
+                if b not in primary.backends:
+                    try:
+                        async with httpx.AsyncClient(timeout=1,trust_env=False) as client:
+                            r = await client.get(b.url+"/health")
+                            r.raise_for_status()
+                    except httpx.HTTPError as exc:
+                        raise HTTPException(409,"Standby unhealthy") from exc
+                    b.alive,b.draining,b.disabled = True,False,False
+                    b.ewma,b.last_selected,b.failures,b.open_until = 0,0,0,0
+                    b.probing = False
+                    primary.backends.append(b)
+                    telemetry.event(f"Scale out: {b.id} joined live pool","good")
+            elif options.action == "remove":
+                b = standby.get(options.backend or "")
+                if b is None:
+                    raise HTTPException(422,"Unknown standby")
+                if b in primary.backends:
+                    b.draining = True
+                    try:
+                        deadline = time.monotonic()+8
+                        while b.active and time.monotonic()<deadline:
+                            await asyncio.sleep(.05)
+                        if b.active:
+                            raise HTTPException(409,"Standby still draining; retry later")
+                        primary.backends.remove(b)
+                        telemetry.event(f"Scale in: {b.id} drained","info")
+                    finally:
+                        b.draining = False
+        return {"strategy":primary.strategy,"members":[b.id for b in primary.backends]}
 
     @app.get("/pulse/metrics")
     async def prometheus():

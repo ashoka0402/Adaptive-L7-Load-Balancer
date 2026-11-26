@@ -17,26 +17,45 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 from app.fastapi_lb.telemetry import percentile
+from app.fastapi_lb.capacity_control import CapacityController, IDS
 
 LOCAL = re.compile(r"(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?", re.I)
 PAGE = Path(__file__).with_name("traffic.html")
-SAMPLE_IDS = ("backend-1", "backend-2", "backend-3")
+SAMPLE_IDS = IDS
 
 
 class TrafficOptions(BaseModel):
     rate: int = Field(default=40, ge=1, le=300)
     duration: int = Field(default=60, ge=5, le=120)
     concurrency: int = Field(default=32, ge=1, le=64)
-    pattern: Literal["constant", "ramp", "burst"] = "constant"
+    pattern: Literal["constant", "ramp", "burst", "spike", "tsunami", "cascade", "recovery"] = "constant"
+
+
+class CapacityOptions(BaseModel):
+    backend: Literal["backend-1","backend-2","backend-3","backend-4","backend-5","backend-6"]
+    enabled: bool = True
+    rate: int = Field(default=40,ge=5,le=500)
+    concurrency: int = Field(default=8,ge=1,le=64)
+    queue: int = Field(default=12,ge=0,le=64)
+    crash: bool = False
+    cooldown: int = Field(default=10,ge=3,le=60)
+
+
+class CapacityPreset(BaseModel):
+    crash: bool = False
+
+
+class AutoOptions(BaseModel):
+    enabled: bool
 
 
 class WorkOptions(BaseModel):
-    backend: Literal["backend-1", "backend-2", "backend-3"]
+    backend: Literal["backend-1","backend-2","backend-3","backend-4","backend-5","backend-6"]
     iterations: int = Field(default=1000, ge=1000, le=300000)
 
 
 class ChaosOptions(BaseModel):
-    backend: Literal["backend-1", "backend-2", "backend-3"]
+    backend: Literal["backend-1","backend-2","backend-3","backend-4","backend-5","backend-6"]
     mode: Literal["normal","offline","unavailable","error","flaky","timeout","disconnect"]
     duration: int = Field(default=30, ge=5, le=120)
 
@@ -137,6 +156,12 @@ class Generator:
                         rate = max(1, round(rate*(second+1)/options.duration))
                     elif options.pattern == "burst" and second%10 >= 3:
                         rate = max(1, rate//5)
+                    elif options.pattern == "spike":
+                        rate = rate if options.duration//3 <= second < 2*options.duration//3 else max(1,rate//5)
+                    elif options.pattern == "cascade":
+                        rate = max(1,round(rate*min(1,.4+.6*second/max(1,options.duration//2))))
+                    elif options.pattern == "recovery" and second >= options.duration//2:
+                        rate = max(1,rate//8)
                     for i in range(rate):
                         due = self.started+second+i/rate
                         await asyncio.sleep(max(0,due-time.monotonic()))
@@ -185,9 +210,11 @@ def create_app() -> FastAPI:
     events: deque[dict] = deque(maxlen=40)
 
     def origin_url(backend: str) -> str:
-        index = SAMPLE_IDS.index(backend)+1
+        index = IDS.index(backend)+1
         hostname = backend if u.hostname == 'load-balancer' else '127.0.0.1'
         return f'http://{hostname}:{8000+index}'
+
+    capacity = CapacityController(generator,target,token,origin_url)
 
     async def set_work(backend: str, iterations: int) -> None:
         if not token:
@@ -231,6 +258,7 @@ def create_app() -> FastAPI:
             async with lock:
                 await asyncio.gather(*(backend_chaos(b) for b in SAMPLE_IDS),
                                      return_exceptions=True)
+                await capacity.tick()
             await asyncio.sleep(1)
 
     @asynccontextmanager
@@ -243,6 +271,7 @@ def create_app() -> FastAPI:
                 poller.cancel()
                 with suppress(asyncio.CancelledError):
                     await poller
+            await capacity.stop()
             await generator.stop()
             if token:
                 await asyncio.gather(*(backend_chaos(b,"normal") for b in SAMPLE_IDS),
@@ -267,14 +296,14 @@ def create_app() -> FastAPI:
     async def status(request: Request):
         guard(request)
         return dict(generator.snapshot(),complexity=complexity,workControl=bool(token),
-                    chaos=chaos_state,chaosEvents=list(events))
+                    chaos=chaos_state,chaosEvents=list(events),capacity=capacity.snapshot())
 
     @app.post("/api/start")
     async def start(request: Request, options: TrafficOptions):
         guard(request)
         async with lock:
-            if generator.running:
-                raise HTTPException(409,"Traffic already running")
+            if generator.running or capacity.busy:
+                raise HTTPException(409,"Traffic or comparison already running")
             generator.task = asyncio.create_task(generator.run(options))
             await asyncio.sleep(0)
         return {"ok":True}
@@ -283,6 +312,7 @@ def create_app() -> FastAPI:
     async def stop(request: Request):
         guard(request)
         async with lock:
+            await capacity.stop()
             await generator.stop()
         return {"ok":True}
 
@@ -290,6 +320,8 @@ def create_app() -> FastAPI:
     async def work(request: Request, options: WorkOptions):
         guard(request)
         async with lock:
+            if capacity.busy:
+                raise HTTPException(409,"Comparison in progress")
             await set_work(options.backend,options.iterations)
         return {"ok":True}
 
@@ -297,6 +329,8 @@ def create_app() -> FastAPI:
     async def chaos(request: Request, options: ChaosOptions):
         guard(request)
         async with lock:
+            if capacity.busy:
+                raise HTTPException(409,"Comparison in progress")
             result = await backend_chaos(options.backend,options.mode,options.duration)
         return {"ok":True,**result}
 
@@ -304,11 +338,64 @@ def create_app() -> FastAPI:
     async def reset_chaos(request: Request):
         guard(request)
         async with lock:
+            if capacity.busy:
+                raise HTTPException(409,"Comparison in progress")
             results = await asyncio.gather(*(backend_chaos(b,"normal") for b in SAMPLE_IDS),
                                            return_exceptions=True)
         failed = [b for b,result in zip(SAMPLE_IDS,results) if isinstance(result,BaseException)]
         if failed:
             raise HTTPException(502,"Could not reset: "+", ".join(failed))
+        return {"ok":True}
+
+    @app.post("/api/capacity")
+    async def capacity_config(request: Request, options: CapacityOptions):
+        guard(request)
+        async with lock:
+            if capacity.busy:
+                raise HTTPException(409,"Comparison in progress")
+            return await capacity.configure(options.backend,options.model_dump(exclude={"backend"}))
+
+    @app.post("/api/capacity/preset")
+    async def capacity_preset(request: Request, options: CapacityPreset):
+        guard(request)
+        async with lock:
+            if capacity.busy or generator.running:
+                raise HTTPException(409,"Stop traffic before changing the whole cluster")
+            await capacity.preset(options.crash)
+        return {"ok":True}
+
+    @app.post("/api/capacity/recover")
+    async def recover_capacity(request: Request):
+        guard(request)
+        async with lock:
+            if capacity.busy:
+                raise HTTPException(409,"Comparison in progress")
+            await capacity.recover()
+        return {"ok":True}
+
+    @app.post("/api/capacity/auto")
+    async def auto_capacity(request: Request, options: AutoOptions):
+        guard(request)
+        async with lock:
+            if capacity.busy or not capacity.available:
+                raise HTTPException(409,"Cluster unavailable or comparison in progress")
+            capacity.auto=options.enabled
+            capacity.high=capacity.low=0
+            capacity.event("Autoscaling enabled" if options.enabled else "Autoscaling disabled")
+        return {"ok":True}
+
+    @app.post("/api/capacity/compare")
+    async def compare_capacity(request: Request, options: TrafficOptions):
+        guard(request)
+        async with lock:
+            if generator.running or capacity.busy or not capacity.available:
+                raise HTTPException(409,"Stop traffic and wait for the sample cluster")
+            async def reset_faults(members):
+                for b in members:
+                    await backend_chaos(b,"normal")
+                    await set_work(b,1000)
+            capacity.job=asyncio.create_task(capacity.compare(options,reset_faults))
+            await asyncio.sleep(0)
         return {"ok":True}
 
     return app
