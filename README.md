@@ -75,3 +75,7 @@ To demonstrate adaptive routing, select latency-aware on Pulse, start constant t
 ### Live Chaos Mode
 
 In the Traffic Control Center, choose one bundled sample backend and inject a time-limited service outage (503 plus failed health probe), 503 responses with healthy probes, HTTP 500, intermittent 500s, delayed timeout, or a real TCP transport abort. The proxy receives no fault commands. Each fault expires automatically at the origin, even if the controller stops. Recover selected or recover all clears fault injection; CPU work controls are separate. The service-level outage does not stop the Docker container; for a real process shutdown use docker compose stop backend-2 and docker compose start backend-2. Fault controls are token-protected on the isolated sample origins and their private namespace is blocked by Pulse.
+
+## Quick start instructions
+
+See [START_HERE.txt](START_HERE.txt) for the complete startup, two-dashboard walkthrough, adaptive-routing demonstration, Chaos Mode controls, shutdown and troubleshooting instructions.

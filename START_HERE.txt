@@ -1,0 +1,154 @@
+PULSE - ADAPTIVE L7 LOAD BALANCER
+START HERE
+================================
+
+1. PREREQUISITES
+----------------
+- Git
+- Docker Desktop with Docker Compose v2 (start Docker Desktop first).
+- Ports 8080 and 8081 available on your computer.
+- Windows: use PowerShell. Commands also work in a Linux/macOS shell.
+- No Python installation is needed for the Docker setup.
+
+2. START THE PROJECT
+--------------------
+If you have not cloned the repository:
+
+  git clone https://github.com/ashoka0402/Adaptive-L7-Load-Balancer.git
+  cd Adaptive-L7-Load-Balancer
+
+If you already have the project, open a terminal in its root folder:
+
+  git pull origin main
+
+Build and start Pulse, the Traffic Control Center, and all three sample backends:
+
+  docker compose up --build -d traffic-center
+
+Check that the services are running:
+
+  docker compose ps
+
+If you previously stopped a sample backend, start it again:
+
+  docker compose up -d backend-1 backend-2 backend-3
+
+3. OPEN THE TWO DASHBOARDS
+-------------------------
+Copy these addresses into your browser:
+
+  Pulse Monitor:           http://localhost:8080/pulse/
+  Traffic Control Center:  http://localhost:8081/
+
+Keep both open side by side. The Pulse root URL (http://localhost:8080/)
+is an application route, not the monitoring dashboard.
+
+The Traffic Control Center sends actual HTTP requests through Pulse
+to three separately running sample applications. Pulse independently
+measures the requests and routes them. The traffic is a controlled test
+workload, not production user traffic.
+
+4. GENERATE LIVE TRAFFIC
+-----------------------
+In the Traffic Control Center:
+  - Request rate: 40 requests/sec
+  - Duration: 120 seconds
+  - Max concurrency: 32
+  - Pattern: Constant
+  - Click Start real traffic.
+
+Observe throughput, latency, success rate, backend distribution and
+activity in Pulse. The Traffic Control Center shows client-side timings
+and response counts. Pulse shows proxy-side measurements.
+Click Stop to end the generator early.
+
+For one real request, use this in PowerShell:
+  curl.exe http://localhost:8080/api/items/7
+
+On Linux/macOS:
+  curl http://localhost:8080/api/items/7
+
+5. DEMONSTRATE ADAPTIVE ROUTING
+------------------------------
+  a. In Pulse, choose Latency Aware (EWMA + Load).
+  b. Start a constant 120-second traffic test.
+  c. Observe the initial traffic distribution for 10-20 seconds.
+  d. In the Traffic Control Center's Adaptive routing experiment,
+     choose backend-2 and 200,000 iterations.
+  e. Click Increase CPU work. Observe latency and traffic redistribution.
+  f. Click Restore normal work. Observe recovery.
+  g. Stop traffic, restore normal workload on all affected backends,
+     then repeat using Round Robin with the same settings.
+
+The sample backend performs real additional CPU computation. EWMA
+updates using measured upstream response latency. Traffic distribution
+and recovery depend on actual measurements; equal shares and a specific
+speedup are not guaranteed.
+
+6. TEST CHAOS MODE
+-----------------
+With traffic running, select backend-2 in Chaos Mode. Choose an automatic
+recovery interval, for example 30 seconds. Try one fault at a time:
+
+  Take offline:       API and health checks return HTTP 503.
+  Return 503:         API returns 503 while health probe remains healthy.
+  Return HTTP 500:    All affected application requests return HTTP 500.
+  Intermittent 500s:  Every third affected request returns HTTP 500.
+  Request timeout:    Application delays responses beyond the client/proxy
+                      timeout settings.
+  Drop connection:    Application aborts the actual TCP transport.
+  Recover selected:   Clear the selected backend's injected fault.
+  Recover all:        Clear injected faults on all three backends.
+
+Faults expire at the backend automatically, even if the Traffic Control
+Center stops. CPU work changes are separate: use Restore normal work
+to reset those. Watch health, breaker state, response codes and latency
+in Pulse. Retries may hide some individual upstream failures from clients.
+
+The offline button simulates a service-level outage using real HTTP 503
+responses, not a stopped Docker container. For an actual container failure:
+  docker compose stop backend-2
+
+To recover it:
+  docker compose start backend-2
+
+7. OPTIONAL REPRODUCIBLE BENCHMARK
+---------------------------------
+If Python 3.12+ is installed locally:
+
+  python -m pip install -r requirements.txt
+  python -m benchmarks.adaptive_proof --output reports/adaptive-proof.json
+
+This starts separate temporary processes and compares Round Robin against
+EWMA under normal, degraded and recovery workloads. Results are written to
+reports/adaptive-proof.json. This benchmark does not drive the currently
+running dashboards.
+
+8. STOP / RESTART / TROUBLESHOOT
+--------------------------------
+Before ending a demo, click Stop, Recover all, and restore normal CPU work
+on any backend you changed.
+
+Stop the project:
+  docker compose down
+
+Restart with updated code:
+  git pull origin main
+  docker compose up --build -d traffic-center
+
+Check logs if a dashboard is unavailable:
+  docker compose ps
+  docker compose logs --tail=100 load-balancer traffic-center
+  docker compose logs --tail=100 backend-1 backend-2 backend-3
+
+If localhost:8080 returns 404, open /pulse/ instead of /.
+If a browser shows Local management only, paste the local address directly
+into the address bar. Keep dashboard ports bound to loopback.
+If ports are occupied, stop the competing application or adjust the
+Compose port mappings and use the matching browser addresses.
+
+Do not expose the token-free local management interfaces to the internet.
+Chaos controls are intended only for the bundled sample backends.
+
+Repository:
+https://github.com/ashoka0402/Adaptive-L7-Load-Balancer
