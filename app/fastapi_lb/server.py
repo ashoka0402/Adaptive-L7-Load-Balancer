@@ -231,13 +231,20 @@ def create_app(
     app = FastAPI(title="Pulse L7 Load Balancer", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
 
-    def local(request: Request) -> None:
+    def local(request: Request, *, dashboard_navigation: bool = False) -> None:
         host = request.headers.get("host", "")
         origin = request.headers.get("origin")
+        # A link from an external website may navigate to the dashboard.
+        # Do not grant this exception to subresources, frames, API reads or mutations.
+        safe_navigation = (
+            dashboard_navigation and request.method in {"GET", "HEAD"}
+            and request.headers.get("sec-fetch-mode") == "navigate"
+            and request.headers.get("sec-fetch-dest") == "document"
+        )
         if (
             not LOCAL_HOST.fullmatch(host)
             or (origin is not None and origin != f"{request.url.scheme}://{host}")
-            or request.headers.get("sec-fetch-site") == "cross-site"
+            or (request.headers.get("sec-fetch-site") == "cross-site" and not safe_navigation)
             or (request.method not in {"GET", "HEAD"}
                 and request.headers.get("x-pulse-local") != "1")
         ):
@@ -279,7 +286,7 @@ def create_app(
     @app.get("/pulse")
     @app.get("/pulse/")
     async def dashboard(request: Request):
-        local(request)
+        local(request, dashboard_navigation=True)
         return FileResponse(DASHBOARD, headers={
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",

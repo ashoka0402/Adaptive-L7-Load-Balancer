@@ -68,3 +68,18 @@ def test_live_forwarding_to_independent_application(tmp_path: Path):
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait()
+
+
+def test_external_link_can_navigate_to_local_dashboard_but_not_management_api():
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        navigation = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate",
+                      "Sec-Fetch-Dest": "document"}
+        assert client.get("/pulse/", headers=navigation).status_code == 200
+        assert client.get("/pulse/api/console", headers=navigation).status_code == 403
+        assert client.get("/pulse/lab.js", headers=navigation).status_code == 403
+        assert client.get("/pulse/", headers={**navigation, "Sec-Fetch-Dest": "iframe"}).status_code == 403
+        assert client.get("/pulse/", headers={**navigation, "Host": "evil.example"}).status_code == 403
+        assert client.post("/pulse/api/strategy",
+                           json={"strategy": "round_robin"},
+                           headers={**navigation, "X-Pulse-Local": "1"}).status_code == 403
+        assert client.get("/pulse/", headers={"Sec-Fetch-Site": "none"}).status_code == 200
