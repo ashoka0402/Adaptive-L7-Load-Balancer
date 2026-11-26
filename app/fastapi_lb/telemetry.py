@@ -21,6 +21,9 @@ class Telemetry:
         self.series: dict[str, deque] = {
             k: deque(maxlen=120) for k in ("rps", "p50", "p95", "p99", "errors")
         }
+        self.traces: deque[dict] = deque(maxlen=200)
+        self.trace_sequence = 0
+        self.outcomes: deque[tuple[float, str, int, float]] = deque(maxlen=20000)
         self.last_tick = time.monotonic()
         self.last_total = 0
 

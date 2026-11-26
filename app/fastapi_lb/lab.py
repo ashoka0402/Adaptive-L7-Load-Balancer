@@ -17,7 +17,9 @@ class Demo:
         self.pool = pool
         self.telemetry = telemetry
         self.target = target
-        self.runners: list[web.AppRunner] = []
+        self.runners: dict[str, web.AppRunner] = {}
+        self.next_id = 0
+        self.breaker_enabled = True
         self.task: asyncio.Task | None = None
         self.arena_task: asyncio.Task | None = None
         self.arena: list[dict] = []
@@ -32,19 +34,30 @@ class Demo:
     def arena_running(self) -> bool:
         return self.arena_task is not None and not self.arena_task.done()
 
-    async def add_backend(self) -> Backend:
+    async def add_backend(self, version: str = "v1") -> Backend:
         if len(self.pool.backends) >= 6:
             raise ValueError("maximum six demo backends")
-        index = len(self.pool.backends)
-        backend = Backend(chr(65 + index), "", weight=index % 3 + 1)
-        delay = (4, 12, 22, 45, 8, 16)[index]
+        index = self.next_id
+        self.next_id += 1
+        backend = Backend(chr(65 + index) if index < 26 else f"N{index}",
+                          "", weight=index % 3 + 1, version=version,
+                          breaker_enabled=self.breaker_enabled)
+        delay = (4, 12, 22, 45, 8, 16)[index % 6]
 
         async def handle(request: web.Request) -> web.Response:
             if request.path == "/health":
                 return web.Response(status=503 if backend.disabled else 200)
             if backend.disabled:
                 return web.Response(status=503, text="Demo backend offline")
-            await asyncio.sleep(delay / 1000)
+            backend.fault_count += 1
+            fault = backend.fault
+            await asyncio.sleep((delay + (250 if fault in {"slow", "timeout"} else 0)) / 1000)
+            if fault == "timeout":
+                await asyncio.sleep(5.5)
+            if fault == "error" or (fault == "flaky" and backend.fault_count % 3 == 0):
+                return web.Response(status=500, text="Injected failure")
+            if fault == "unavailable":
+                return web.Response(status=503, text="Injected unavailable")
             return web.Response(text=backend.id, headers={"X-Backend": backend.id})
 
         app = web.Application()
@@ -59,10 +72,26 @@ class Demo:
             await runner.cleanup()
             raise
         backend.url = f"http://127.0.0.1:{port}"
-        self.runners.append(runner)
+        self.runners[backend.id] = runner
         self.pool.backends.append(backend)
         self.telemetry.event(f"Backend {backend.id} added ({delay} ms base delay)", "good")
         return backend
+
+    async def remove_backend(self, backend: Backend) -> bool:
+        backend.draining = True
+        deadline = time.monotonic() + 8
+        while backend.active and time.monotonic() < deadline:
+            await asyncio.sleep(.1)
+        if backend.active:
+            backend.draining = False
+            return False
+        if backend in self.pool.backends:
+            self.pool.backends.remove(backend)
+        runner = self.runners.pop(backend.id, None)
+        if runner:
+            await runner.cleanup()
+        self.telemetry.event(f"Backend {backend.id} drained and removed")
+        return True
 
     async def load(self, workers: int, duration: float = 60.0) -> None:
         deadline = time.monotonic() + duration
@@ -131,5 +160,5 @@ class Demo:
             self.arena_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self.arena_task
-        for runner in self.runners:
+        for runner in self.runners.values():
             await runner.cleanup()

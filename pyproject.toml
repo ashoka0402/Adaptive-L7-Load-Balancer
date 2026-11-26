@@ -49,4 +49,4 @@ include = ["app*", "backends*"]
 
 [tool.setuptools.package-data]
 "app.ui" = ["static/*.html", "static/*.css", "static/*.js"]
-"app.fastapi_lb" = ["*.html"]
+"app.fastapi_lb" = ["*.html", "*.js"]

@@ -66,21 +66,46 @@ class Proxy:
         self.max_body = max_body
         self.active = 0
         self.retry_tokens = 10.0
+        self.policy = {"breaker": True, "retries": True, "pooling": True,
+                       "rate_limit": False, "backpressure": True}
+        self.rate_tokens = 200.0
+        self.rate_last = time.monotonic()
+        self.trace_enabled = False
 
     def record(self, request: Request, start: float, status: int, backend: str = "") -> None:
         ms = (time.monotonic() - start) * 1000
         ok = 200 <= status < 400
         self.telemetry.record(ms, ok, backend)
+        self.telemetry.outcomes.append((time.monotonic(), backend, status, ms))
+        trace = getattr(request.state, "pulse_trace", None)
+        if trace is not None:
+            trace.update(status=status, elapsed_ms=round(ms, 2), backend=backend)
+            self.telemetry.traces.append(trace)
         metrics.REQUESTS_TOTAL.labels(method=request.method, status=str(status)).inc()
         metrics.REQUEST_LATENCY.observe(ms / 1000)
 
     async def handle(self, request: Request) -> Response:
         start = time.monotonic()
+        trace = None
+        if self.trace_enabled:
+            self.telemetry.trace_sequence += 1
+            trace = {"id": self.telemetry.trace_sequence, "method": request.method,
+                     "ts": int(time.time()*1000), "attempts": []}
+            request.state.pulse_trace = trace
         pool = self.routes.match(request.url.path)
         if pool is None:
             self.record(request, start, 404)
             return Response("No matching route", 404)
-        if self.active >= self.max_active:
+        if self.policy["rate_limit"]:
+            now = time.monotonic()
+            self.rate_tokens = min(200, self.rate_tokens + (now-self.rate_last)*200)
+            self.rate_last = now
+            if self.rate_tokens < 1:
+                self.record(request, start, 429)
+                return Response("Demo rate limit", 429)
+            self.rate_tokens -= 1
+        # Hard cap remains even when experimental admission is switched off.
+        if self.active >= (self.max_active if self.policy["backpressure"] else 160):
             self.record(request, start, 503)
             metrics.REJECTED.inc()
             return Response("Overloaded", 503, headers={"Retry-After": "1"})
@@ -101,13 +126,17 @@ class Proxy:
                 return Response("Request body timeout", 408)
             self.retry_tokens = min(10.0, self.retry_tokens + 0.1)
             excluded: set[str] = set()
-            for attempt in range(2 if request.method in {"GET", "HEAD"} else 1):
+            for attempt in range(2 if self.policy["retries"] and request.method in {"GET", "HEAD"} else 1):
                 if attempt:
                     if self.retry_tokens < 1:
                         break
                     self.retry_tokens -= 1
                     metrics.RETRIES.inc()
-                backend = pool.select(request.client.host if request.client else "", excluded)
+                decision: dict = {}
+                backend = pool.select(request.client.host if request.client else "", excluded,
+                                      decision if trace is not None else None)
+                if trace is not None:
+                    trace["attempts"].append(decision)
                 if backend is None:
                     break
                 excluded.add(backend.id)
@@ -124,6 +153,8 @@ class Proxy:
                         raw_path=raw_path + (b"?" + query if query else b"")
                     )
                     headers = clean_headers(list(request.headers.raw), request=True)
+                    if not self.policy["pooling"]:
+                        headers.append((b"connection", b"close"))
                     upstream = httpx.Request(
                         request.method, target, headers=headers, content=bytes(body)
                     )
@@ -131,7 +162,10 @@ class Proxy:
                     self.client.cookies.clear()
                     status = response.status_code
                     outcome = status < 500
-                    if status in {502, 503, 504} and request.method in {"GET", "HEAD"}:
+                    decision["upstream_status"] = status
+                    if backend.version == "v2" and status in {502, 503, 504}:
+                        self.telemetry.outcomes.append((time.monotonic(), backend.id, status, (time.monotonic()-sent)*1000))
+                    if self.policy["retries"] and status in {502, 503, 504} and request.method in {"GET", "HEAD"}:
                         if attempt == 0 and self.retry_tokens >= 1 and any(
                             b.available and b.id not in excluded for b in pool.backends
                         ):
@@ -171,6 +205,9 @@ class Proxy:
                     transferred = keep = True
                     return result
                 except (httpx.HTTPError, ValueError):
+                    decision["upstream_status"] = "transport error"
+                    if backend.version == "v2":
+                        self.telemetry.outcomes.append((time.monotonic(), backend.id, 502, (time.monotonic()-sent)*1000))
                     outcome = False
                 finally:
                     if not keep:

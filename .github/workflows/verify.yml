@@ -60,6 +60,7 @@ jobs:
         run: |
           node --check app/ui/static/app.js
           node --check app/ui/static/model.js
+          node --check app/fastapi_lb/lab.js
           node --test frontend_tests/model.test.mjs
       - run: python -m pip install -e '.[dev]' playwright
       - run: python -m playwright install --with-deps chromium

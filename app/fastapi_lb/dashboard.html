@@ -201,6 +201,32 @@
     .scopebar { padding:12px; }
     .graphwrap { height:var(--graph-height,380px); }
   }
+
+  .lab-nav { display:flex; gap:8px; flex-wrap:wrap; padding:12px 24px; border-bottom:1px solid var(--line); }
+  .lab-nav a { color:var(--muted); text-decoration:none; padding:9px 12px; border-radius:6px; border:1px solid var(--line); font-size:12px; }
+  .lab-nav a:hover,.lab-nav a:focus-visible { color:var(--cream); border-color:var(--brass); }
+  .lab-section { padding:18px 24px 10px; scroll-margin-top:12px; min-width:0; }
+  .lab-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
+  .lab-card { border:1px solid var(--line); background:var(--panel); padding:18px; border-radius:10px; min-width:0; }
+  .lab-card h3 { font:500 20px Georgia,serif; margin:0 0 8px; }
+  .lab-card p { color:var(--muted); font-size:12px; line-height:1.65; margin:0 0 14px; }
+  .lab-controls { display:flex; flex-wrap:wrap; align-items:center; gap:9px; margin:10px 0; }
+  .lab-controls label { display:flex; gap:6px; align-items:center; color:var(--muted); font-size:12px; }
+  .lab-controls input[type=number] { width:74px; }
+  .lab-controls input[type=checkbox] { accent-color:var(--brass); }
+  .lab-controls select,.lab-controls input { max-width:100%; min-width:0; }
+  .lab-table { overflow-x:auto; max-width:100%; }
+  .lab-table table { width:100%; border-collapse:collapse; white-space:nowrap; font-size:11px; }
+  .lab-table td,.lab-table th { text-align:left; padding:9px; border-bottom:1px solid var(--line); }
+  .lab-table th { color:var(--muted); font-weight:500; }
+  #labNotice:not(:empty) { position:fixed; bottom:16px; right:16px; max-width:min(420px,calc(100vw - 32px)); z-index:10; background:var(--panel); padding:12px; border:1px solid var(--brass); border-radius:8px; }
+  .lab-status { font-size:12px; color:var(--brass); margin:8px 0; overflow-wrap:anywhere; }
+  .lab-card canvas { display:block; width:100%; height:200px; }
+  .lab-range { width:100%; accent-color:var(--brass); }
+  .lab-pre { white-space:pre-wrap; overflow-wrap:anywhere; color:var(--muted); font-size:11px; line-height:1.7; }
+  .lab-wide { grid-column:1/-1; }
+  @media(max-width:900px) { .lab-grid { grid-template-columns:minmax(0,1fr); } }
+  @media(max-width:520px) { .lab-section { padding:14px 12px; } .lab-nav { padding:12px; } .lab-card { padding:12px; } }
 </style>
 </head>
 <body>
@@ -227,7 +253,10 @@
     <label class="field"><span class="lab">workers</span><select id="workers"><option>4</option><option>12</option><option selected>24</option><option>48</option></select></label><button type="button" class="run" id="run">Run test</button><button class="secondary" id="theme" type="button">Light mode</button>
   </header>
 
-  <section class="readouts">
+  <nav class="lab-nav" aria-label="Pulse sections">
+    <a href="#dashboard">Dashboard</a><a href="#chaosLab">Chaos Lab</a><a href="#battleLab">Battle Arena</a><a href="#inspectorLab">Request Inspector</a>
+  </nav>
+  <section class="readouts" id="dashboard">
     <div class="ro live"><span class="lab">throughput</span><span class="rv serif" id="rps">0<i>req/s</i></span></div>
     <div class="ro"><span class="lab">latency p50</span><span class="rv serif" id="p50">0<i>ms</i></span></div>
     <div class="ro"><span class="lab">latency p95</span><span class="rv serif" id="p95">0<i>ms</i></span></div><div class="ro"><span class="lab">latency p99</span><span class="rv serif" id="p99">0<i>ms</i></span></div>
@@ -258,11 +287,38 @@
       <article class="scopebar"><div class="chart-head"><span class="lab">Error rate</span><span class="chart-value" id="errorValue">0%</span></div><canvas id="errorScope" role="img" aria-label="Error rate history in percent"></canvas></article>
     </div>
   </section>
-  <section class="lower" aria-label="Experiments and activity">
+  <section class="lower" aria-label="Quick comparison and activity">
       <div class="panel"><div class="ph"><span class="t">Battle arena</span><button class="secondary" id="arena" type="button">Compare</button></div><div id="arenaResult" class="arena-result">Same request count and worker count for each algorithm.</div></div><div class="panel console">
         <div class="ph"><span class="t">Activity</span></div>
         <div class="feed" id="feed"><div class="empty">awaiting traffic…</div></div>
       </div>
+  </section>
+  <section class="lab-section" id="chaosLab">
+    <div class="section-head"><h2>Chaos Lab</h2><span>Real loopback traffic · bounded experiments</span></div>
+    <div class="lab-grid">
+      <article class="lab-card"><h3>Fault injection</h3><p>Change a running demo origin without touching external services.</p>
+        <div class="lab-controls"><label>Backend <select id="faultBackend"></select></label><label>Fault <select id="faultKind"><option value="normal">Normal / restore</option><option value="slow">+250 ms latency</option><option value="flaky">Intermittent 500</option><option value="error">Always 500</option><option value="unavailable">503 unavailable</option><option value="timeout">Timeout</option><option value="offline">Offline</option></select></label><button class="secondary" id="applyFault">Apply fault</button></div><div id="faultState" class="lab-status"></div>
+      </article>
+      <article class="lab-card"><h3>Autoscaling</h3><p>Launch real local listeners on sustained demand, then drain and remove idle replicas. Two to six servers, five-second cooldown.</p><div class="lab-controls"><button class="secondary" id="scaleToggle">Enable autoscaling</button></div><div id="scaleState" class="lab-status"></div></article>
+      <article class="lab-card"><h3>Canary deployment</h3><p>Allocate traffic to a separate v2 server. Auto-promote advances healthy releases through staged percentages; an open circuit or error/latency threshold triggers rollback.</p><div class="lab-controls"><label>v2 traffic <select id="canaryPercent"><option>0</option><option selected>10</option><option>25</option><option>50</option><option>75</option><option>100</option></select>%</label><label><input type="checkbox" id="canaryFault"> Faulty release</label><label><input type="checkbox" id="canaryAuto"> Auto-promote</label><button class="secondary" id="canaryApply">Apply allocation</button></div><div id="canaryState" class="lab-status"></div></article>
+      <article class="lab-card"><h3>Resilience controls</h3><p>Toggle protections while testing. A hard concurrency ceiling always remains; disabling pooling requests connection closure.</p><div class="lab-controls" id="policyControls"><label><input type="checkbox" data-policy="breaker" checked> Circuit breaker</label><label><input type="checkbox" data-policy="retries" checked> Retries</label><label><input type="checkbox" data-policy="pooling" checked> Keep-alive</label><label><input type="checkbox" data-policy="rate_limit"> Rate limit</label><label><input type="checkbox" data-policy="backpressure" checked> Backpressure</label></div><button class="secondary" id="policyApply">Apply policies</button></article>
+      <article class="lab-card lab-wide"><h3>The Breaking Point</h3><p>Increase offered arrivals from 50 to 800 req/s. A step saturates when success drops below 99%, p95 exceeds 200 ms, or goodput falls below 85% of offered rate.</p><div class="lab-controls"><button class="secondary" data-run="breaking">Run saturation test</button><button class="secondary" data-stop>Cancel experiment</button></div><div class="lab-status" id="breakingState"></div><canvas id="breakingGraph" role="img" aria-label="Offered versus successful request rate"></canvas><div class="lab-table" id="breakingTable"></div></article>
+    </div>
+  </section>
+  <section class="lab-section" id="battleLab">
+    <div class="section-head"><h2>Battle Arena</h2><span>Comparable workloads · measured results</span></div>
+    <div class="lab-card"><h3>Algorithm warfare &amp; resilience comparison</h3><p>Run each strategy under one scenario, or compare all-enabled protections against one disabled at a time. Winner prioritizes success, then p95, then goodput. Stop the normal load test, scaling and active canary first.</p>
+      <div class="lab-controls"><label>Scenario <select id="labScenario"><option value="normal">Normal</option><option value="slow">Slow backend</option><option value="outage">Backend outage</option><option value="overload">Slow cluster / overload</option></select></label><label>Workers <select id="labWorkers"><option>12</option><option>24</option><option selected>48</option><option>100</option><option>160</option></select></label><button class="secondary" data-run="arena">Compare algorithms</button><button class="secondary" data-run="resilience">Compare protections</button><button class="secondary" data-stop>Cancel experiment</button></div>
+      <div class="lab-status" id="battleState"></div><div class="lab-table" id="battleTable"></div>
+    </div>
+  </section>
+  <section class="lab-section" id="inspectorLab">
+    <div class="section-head"><h2>Request Inspector</h2><span>Routing decisions &amp; incident replay</span></div>
+    <div class="lab-grid">
+      <article class="lab-card"><h3>Request X-Ray</h3><p>Inspect a recent request's actual selection, candidate state, score and retry attempts. No request body, URL or credentials retained.</p><div class="lab-controls"><button class="secondary" id="traceRefresh">Refresh traces</button><label>Request <select id="traceSelect"></select></label></div><div id="traceView" class="lab-pre">Generate traffic to collect traces.</div></article>
+      <article class="lab-card"><h3>Incident time machine</h3><p>Capture up to 120 seconds of telemetry and events, scrub the timeline, or export the recording as JSON.</p><div class="lab-controls"><button class="secondary" id="recordStart">Record</button><button class="secondary" id="recordStop">Stop recording</button><button class="secondary" id="replayLoad">Load recording</button><button class="secondary" id="replayPlay">Play</button><button class="secondary" id="replayExport">Export JSON</button></div><div id="replayState" class="lab-status"></div><input class="lab-range" id="replaySlider" type="range" min="0" max="0" value="0" aria-label="Replay timeline"><div id="replayView" class="lab-pre">No recording loaded.</div></article>
+    </div>
+    <div id="labNotice" class="lab-status" role="status" aria-live="polite"></div>
   </section>
 </div>
 
@@ -327,6 +383,7 @@
     if (s.arenaRunning) $('arenaResult').textContent = 'Running real HTTP comparison…';
     else if (s.arena && s.arena.length) $('arenaResult').innerHTML = '<table><thead><tr><th>Algorithm</th><th>req/s</th><th>p95 ms</th><th>OK %</th></tr></thead><tbody>' + s.arena.map(r => '<tr><td>'+r.strategy+'</td><td>'+r.rps+'</td><td>'+r.p95+'</td><td>'+r.successPct+'</td></tr>').join('') + '</tbody></table>';
     $('strategy').value = s.strategy;
+    window.renderLab?.(s);
   }
 
   // ---------- canvas helpers ----------
@@ -548,5 +605,6 @@
   for (const id of ['scope','latencyScope','errorScope']) chartResize.observe($(id));
   window.addEventListener('resize', () => latest && drawCharts(latest));
 </script>
+<script src="/pulse/lab.js"></script>
 </body>
 </html>

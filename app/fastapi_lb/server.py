@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from pydantic import BaseModel, Field
 
 from app.fastapi_lb.lab import Demo
+from app.fastapi_lb.experiments import Experiments
 from app.fastapi_lb.proxy import METHODS, Proxy
 from app.fastapi_lb.routing import Backend, Pool, RouteTrie, STRATEGIES
 from app.fastapi_lb.telemetry import Telemetry
@@ -36,6 +37,35 @@ class StrategyOptions(BaseModel):
         "round_robin", "weighted_round_robin", "least_connections",
         "least_latency", "least_loaded", "p2c", "ip_hash", "latency_aware",
     ]
+
+
+class ExperimentOptions(BaseModel):
+    mode: Literal["breaking", "arena", "resilience"]
+    scenario: Literal["normal", "slow", "outage", "overload"] = "normal"
+    workers: int = Field(default=48, ge=1, le=160)
+
+
+class FaultOptions(BaseModel):
+    backend: str
+    fault: Literal["normal", "slow", "flaky", "error", "unavailable", "timeout", "offline"]
+
+
+class PolicyOptions(BaseModel):
+    breaker: bool = True
+    retries: bool = True
+    pooling: bool = True
+    rate_limit: bool = False
+    backpressure: bool = True
+
+
+class ScalingOptions(BaseModel):
+    enabled: bool
+
+
+class CanaryOptions(BaseModel):
+    percent: int = Field(ge=0, le=100)
+    faulty: bool = False
+    auto: bool = False
 
 
 def configured_routes(path: str) -> dict[str, Pool]:
@@ -107,6 +137,7 @@ def create_app(
     is_demo = config is None
     add_lock = asyncio.Lock()
     proxy: Proxy
+    experiments: Experiments
 
     async def health_loop(client: httpx.AsyncClient) -> None:
         async def probe(backend: Backend) -> None:
@@ -136,6 +167,8 @@ def create_app(
         while True:
             await asyncio.sleep(.5)
             telemetry.tick()
+            if is_demo:
+                await experiments.tick()
             for pool in routes.values():
                 for b in pool.backends:
                     old = breaker_states.get(b.id)
@@ -152,7 +185,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal proxy
+        nonlocal proxy, experiments
         async with httpx.AsyncClient(
             limits=httpx.Limits(max_connections=120, max_keepalive_connections=60),
             timeout=httpx.Timeout(5, connect=2),
@@ -162,7 +195,10 @@ def create_app(
                 for _ in range(4):
                     await demo.add_backend()
             proxy = Proxy(trie, client, telemetry)
+            proxy.trace_enabled = is_demo
+            experiments = Experiments(demo, proxy, add_lock)
             app.state.proxy = proxy
+            app.state.experiments = experiments
             tasks = [asyncio.create_task(health_loop(client)), asyncio.create_task(tick())]
             try:
                 yield
@@ -170,6 +206,7 @@ def create_app(
                 for task in tasks:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
+                await experiments.close()
                 await demo.close()
 
     app = FastAPI(title="Pulse L7 Load Balancer", lifespan=lifespan,
@@ -192,7 +229,8 @@ def create_app(
         count = sum(shares.values()) or 1
         all_backends = [b for pool in routes.values() for b in pool.backends]
         return {
-            "running": demo.running, "arenaRunning": demo.arena_running,
+            "running": demo.running, "arenaRunning": demo.arena_running or experiments.busy,
+            "lab": experiments.state_view() if is_demo else None,
             "arena": demo.arena, "demo": is_demo,
             "strategy": primary.strategy, "workers": demo.workers,
             "elapsed": round(time.monotonic() - demo.started) if demo.running else 0,
@@ -203,7 +241,8 @@ def create_app(
             **{k: values[-1] if values else 0 for k, values in telemetry.series.items()},
             "series": {k: list(v) for k, v in telemetry.series.items()},
             "backends": [{
-                "id": b.id, "label": f"Backend {b.id}", "dead": b.disabled,
+                "id": b.id, "label": f"Backend {b.id}", "dead": b.disabled or b.draining,
+                "fault": b.fault, "version": b.version,
                 "alive": b.alive, "breaker": b.breaker, "active": b.active,
                 "latency": round(b.ewma, 1), "served": b.served,
                 "share": round(100 * shares[b.id] / count),
@@ -223,6 +262,11 @@ def create_app(
             "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
             "frame-ancestors 'none'; object-src 'none'; base-uri 'none'",
         })
+
+    @app.get("/pulse/lab.js")
+    async def lab_script(request: Request):
+        local(request)
+        return FileResponse(DASHBOARD.with_name("lab.js"), media_type="text/javascript")
 
     @app.get("/api/stream")
     async def stream(request: Request):
@@ -244,7 +288,7 @@ def create_app(
     @app.post("/api/test/start")
     async def start(request: Request, options: LoadOptions):
         local(request)
-        if not is_demo or demo.arena_running:
+        if not is_demo or demo.arena_running or experiments.busy:
             raise HTTPException(409, "Load generation requires idle demo mode")
         if not demo.running:
             demo.workers = options.workers
@@ -263,8 +307,8 @@ def create_app(
     @app.post("/api/strategy")
     async def change_strategy(request: Request, options: StrategyOptions):
         local(request)
-        if demo.arena_running:
-            raise HTTPException(409, "Arena is running")
+        if demo.arena_running or experiments.busy:
+            raise HTTPException(409, "Experiment is running")
         primary.strategy = options.strategy
         telemetry.event(f"Strategy changed to {options.strategy}")
         return {"ok": True, "strategy": primary.strategy}
@@ -273,8 +317,8 @@ def create_app(
     async def add(request: Request):
         local(request)
         async with add_lock:
-            if not is_demo or demo.arena_running:
-                raise HTTPException(409, "Adding servers requires demo mode")
+            if not is_demo or demo.arena_running or experiments.busy or experiments.scaling:
+                raise HTTPException(409, "Adding servers requires idle manual demo mode")
             try:
                 b = await demo.add_backend()
             except ValueError as exc:
@@ -284,7 +328,7 @@ def create_app(
     @app.post("/api/backend/{backend_id}/toggle")
     async def toggle(request: Request, backend_id: str):
         local(request)
-        if not is_demo or demo.arena_running:
+        if not is_demo or demo.arena_running or experiments.busy:
             raise HTTPException(409, "Backend toggles require demo mode")
         b = next((b for b in primary.backends if b.id == backend_id), None)
         if b is None:
@@ -299,10 +343,102 @@ def create_app(
     @app.post("/api/arena")
     async def arena(request: Request, options: LoadOptions):
         local(request)
-        if not is_demo or demo.running or demo.arena_running:
+        if not is_demo or demo.running or demo.arena_running or experiments.busy or experiments.scaling or primary.canary_percent:
             raise HTTPException(409, "Arena requires idle demo mode")
         demo.arena_task = asyncio.create_task(demo.benchmark(options.workers))
         return {"ok": True}
+
+    def require_demo(request: Request, idle: bool = False) -> None:
+        local(request)
+        if not is_demo:
+            raise HTTPException(403, "Experiments require the loopback demo")
+        if idle and (experiments.busy or demo.arena_running):
+            raise HTTPException(409, "An experiment is running")
+
+    @app.post("/api/lab/run")
+    async def run_experiment(request: Request, options: ExperimentOptions):
+        require_demo(request, idle=True)
+        async with add_lock:
+            if (experiments.busy or demo.running or demo.arena_running
+                    or experiments.scaling or primary.canary_percent):
+                raise HTTPException(409, "Stop traffic, autoscaling and canary first")
+            if not any(b.version == "v1" for b in primary.backends):
+                raise HTTPException(409, "No stable backends")
+            experiments.job = asyncio.create_task(experiments.run(
+                options.mode, options.scenario, options.workers
+            ))
+        return {"ok": True}
+
+    @app.post("/api/lab/stop")
+    async def stop_experiment(request: Request):
+        require_demo(request)
+        await experiments.close()
+        return {"ok": True}
+
+    @app.post("/api/lab/fault")
+    async def fault(request: Request, options: FaultOptions):
+        require_demo(request, idle=True)
+        b = next((b for b in primary.backends if b.id == options.backend), None)
+        if b is None:
+            raise HTTPException(404, "Unknown backend")
+        b.fault = "normal" if options.fault == "offline" else options.fault
+        b.disabled = options.fault == "offline"
+        b.fault_count = 0
+        if options.fault == "normal":
+            b.alive, b.open_until, b.failures = True, 0, 0
+        telemetry.event(f"{b.id}: fault {options.fault}", "good" if options.fault == "normal" else "bad")
+        return {"ok": True}
+
+    @app.post("/api/lab/policy")
+    async def policy(request: Request, options: PolicyOptions):
+        require_demo(request, idle=True)
+        experiments.set_policy(options.model_dump())
+        return {"ok": True}
+
+    @app.post("/api/lab/scaling")
+    async def scaling(request: Request, options: ScalingOptions):
+        require_demo(request, idle=True)
+        async with add_lock:
+            if experiments.busy or demo.arena_running:
+                raise HTTPException(409, "An experiment is running")
+            if options.enabled and primary.canary_percent:
+                raise HTTPException(409, "Pause canary first")
+            experiments.scaling = options.enabled
+            experiments.low_streak = experiments.scale_streak = 0
+        telemetry.event("Autoscaler enabled" if options.enabled else "Autoscaler disabled")
+        return {"ok": True}
+
+    @app.post("/api/lab/canary")
+    async def canary(request: Request, options: CanaryOptions):
+        require_demo(request, idle=True)
+        if experiments.scaling:
+            raise HTTPException(409, "Disable autoscaling first")
+        if options.percent == 0 and experiments.canary_id is None:
+            return {"ok": True}
+        try:
+            await experiments.canary(options.percent, options.faulty, options.auto)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"ok": True}
+
+    @app.post("/api/lab/record/{action}")
+    async def record(request: Request, action: Literal["start", "stop"]):
+        require_demo(request, idle=True)
+        if action == "start":
+            experiments.record_start()
+        else:
+            experiments.recording = False
+        return {"ok": True}
+
+    @app.get("/api/lab/replay")
+    async def replay(request: Request):
+        require_demo(request)
+        return {"frames": list(experiments.frames), "recording": experiments.recording}
+
+    @app.get("/api/lab/traces")
+    async def traces(request: Request):
+        require_demo(request)
+        return {"traces": list(reversed(telemetry.traces))}
 
     @app.get("/metrics")
     async def prometheus():
