@@ -26,6 +26,8 @@ services:
     build:
       context: .
       dockerfile: backends/Dockerfile
+    environment:
+      PULSE_BENCHMARK_TOKEN: ${PULSE_BENCHMARK_TOKEN:-pulse-compose-local-workload}
     command: ["python", "-m", "backends.workload", "--host", "0.0.0.0", "--port", "8001", "--id", "backend-1"]
     expose:
       - "8001"
@@ -35,6 +37,8 @@ services:
     build:
       context: .
       dockerfile: backends/Dockerfile
+    environment:
+      PULSE_BENCHMARK_TOKEN: ${PULSE_BENCHMARK_TOKEN:-pulse-compose-local-workload}
     command: ["python", "-m", "backends.workload", "--host", "0.0.0.0", "--port", "8002", "--id", "backend-2"]
     expose:
       - "8002"
@@ -44,9 +48,25 @@ services:
     build:
       context: .
       dockerfile: backends/Dockerfile
+    environment:
+      PULSE_BENCHMARK_TOKEN: ${PULSE_BENCHMARK_TOKEN:-pulse-compose-local-workload}
     command: ["python", "-m", "backends.workload", "--host", "0.0.0.0", "--port", "8003", "--id", "backend-3"]
     expose:
       - "8003"
+    restart: unless-stopped
+
+  traffic-center:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      PULSE_TRAFFIC_TARGET: http://load-balancer:8080
+      PULSE_BENCHMARK_TOKEN: ${PULSE_BENCHMARK_TOKEN:-pulse-compose-local-workload}
+    command: ["uvicorn", "app.fastapi_lb.traffic:app", "--host", "0.0.0.0", "--port", "8081", "--no-access-log"]
+    depends_on:
+      - load-balancer
     restart: unless-stopped
 
   prometheus:

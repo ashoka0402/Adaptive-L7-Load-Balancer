@@ -106,13 +106,18 @@ jobs:
           docker compose config --quiet
           docker compose -f docker-compose.lab.yml config --quiet
       - name: Build and launch Pulse with its three demo backends
-        run: docker compose up -d --build load-balancer
+        run: docker compose up -d --build traffic-center
       - name: Check real proxy, console, and local control plane
         run: |
           curl --fail --retry 20 --retry-delay 2 --retry-all-errors http://127.0.0.1:8080/pulse/
           curl --fail --retry 20 --retry-delay 2 --retry-all-errors http://127.0.0.1:8080/api/test
           curl --fail http://127.0.0.1:8080/pulse/api/console
-          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: external.example' http://127.0.0.1:8080/admin/console)" = 403
+          curl --fail --retry 10 --retry-delay 1 --retry-all-errors http://127.0.0.1:8081/api/status
+          curl --fail -H 'X-Pulse-Local: 1' -H 'Content-Type: application/json' -d '{"rate":10,"duration":5,"concurrency":4}' http://127.0.0.1:8081/api/start
+          sleep 7
+          curl --fail http://127.0.0.1:8081/api/status | python -c 'import json,sys; s=json.load(sys.stdin); assert s["state"]=="completed" and s["success"]>0, s'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/__benchmark/complexity)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: external.example' http://127.0.0.1:8080/pulse/api/console)" = 403
       - name: Run network-isolated Docker Arena
         run: |
           mkdir -p reports

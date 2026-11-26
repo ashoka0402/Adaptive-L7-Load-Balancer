@@ -33,7 +33,7 @@ def clean_headers(
     if request:
         blocked |= {
             b"host", b"content-length", b"forwarded", b"x-forwarded-for",
-            b"x-forwarded-host", b"x-forwarded-proto",
+            b"x-forwarded-host", b"x-forwarded-proto", b"x-benchmark-token",
         }
     else:
         blocked |= {b"x-backend", b"x-pulse-routing-us", b"x-pulse-upstream-headers-ms"}

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pulse — Traffic Control Center</title>
+<style>
+:root{color-scheme:dark;--bg:#0d1b1d;--panel:#13282b;--line:#294244;--text:#ece8d7;--muted:#a1b2ad;--gold:#d3aa54;--green:#80bd98;--red:#e58b79}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 ui-monospace,Consolas,monospace}header,main{max-width:1440px;margin:auto;padding:20px 24px}header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;border-bottom:1px solid var(--line)}h1,h2{font:500 25px Georgia,serif;margin:0 0 8px}h1 strong{color:var(--gold)}h2{font-size:21px}p,small{color:var(--muted)}p{margin:4px 0 16px}a{color:var(--gold)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:20px;min-width:0}.wide{grid-column:1/-1}.fields{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px}.fields label{flex:1;min-width:115px;display:grid;gap:6px;color:var(--muted);font-size:12px}input,select,button{background:#193639;border:1px solid var(--line);border-radius:6px;color:var(--text);font:inherit;padding:9px 12px;min-width:0}button{cursor:pointer}button.primary{background:var(--gold);color:#18211d;font-weight:700}button:disabled{opacity:.45;cursor:not-allowed}button:focus-visible,a:focus-visible{outline:2px solid var(--gold)}.actions{display:flex;gap:10px;flex-wrap:wrap}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}.stat{padding:14px;border:1px solid var(--line);border-radius:8px}.stat b{font:500 28px Georgia,serif;display:block}.stat small{font-size:10px;text-transform:uppercase}.meter{height:9px;background:#284043;border-radius:5px;overflow:hidden}.meter i{display:block;height:100%;background:var(--gold)}.row{display:flex;justify-content:space-between;gap:8px;margin:10px 0 5px}.scroll{overflow-x:auto;max-height:340px}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line);font-size:12px}th{color:var(--muted)}canvas{width:100%;height:210px;display:block}.notice{color:var(--red);min-height:20px;margin-top:10px}#state{color:var(--gold)}@media(max-width:760px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}header,main{padding:14px}.card{padding:14px}}
+</style></head><body><header><div><h1><strong>Pulse.</strong> Traffic Control Center</h1><small>Independent HTTP client · actual network requests</small></div><div><a id="monitor" href="http://localhost:8080/pulse/" target="_blank" rel="noopener">Open live monitor ↗</a></div></header>
+<main><div class="grid"><section class="card"><h2>Generate traffic</h2><p>Send real GET requests to the sample application's SQLite-backed item API. No fake metrics or direct telemetry updates.</p><div class="fields"><label>Requests / sec<input id="rate" type="number" min="1" max="300" value="40"></label><label>Duration (seconds)<input id="duration" type="number" min="5" max="120" value="60"></label><label>Max concurrency<input id="concurrency" type="number" min="1" max="64" value="32"></label><label>Pattern<select id="pattern"><option value="constant">Constant</option><option value="ramp">Gradual ramp</option><option value="burst">Recurring bursts</option></select></label></div><div class="actions"><button class="primary" id="start">Start real traffic</button><button id="stop">Stop</button></div><div class="notice" id="notice" role="status"></div><span id="state">Connecting</span><div class="meter"><i id="progress" style="width:0%"></i></div></section>
+<section class="card"><h2>Adaptive routing experiment</h2><p>While traffic is running, increase a backend's actual CPU computation. It stays online. Watch Pulse independently shift requests away, then restore the workload to test recovery.</p><div class="fields"><label>Sample backend<select id="backend"><option>backend-1</option><option selected>backend-2</option><option>backend-3</option></select></label><label>Compute workload<select id="work"><option value="50000">50k iterations</option><option value="100000">100k iterations</option><option value="200000" selected>200k iterations</option><option value="300000">300k iterations</option></select></label></div><div class="actions"><button id="slow">Increase CPU work</button><button id="restore">Restore normal work</button></div><div id="workStatus" style="margin-top:12px"></div></section>
+<section class="card wide"><h2>Actual client measurements</h2><div class="stats" id="stats"></div><canvas id="chart" role="img" aria-label="Offered requests versus successful responses per second"></canvas><small>Gold: offered requests · Green: completed successful responses in each second. Late responses can cross interval boundaries.</small></section>
+<section class="card"><h2>Successful responses by backend</h2><p>Whole run · measured from the response header.</p><div id="shares"></div></section><section class="card"><h2>Recent HTTP responses</h2><div class="scroll"><table><thead><tr><th>Request</th><th>HTTP</th><th>Backend</th><th>Latency</th></tr></thead><tbody id="recent"></tbody></table></div></section></div></main>
+<script>
+const $=id=>document.getElementById(id);
+let current;
+function notice(msg){$('notice').textContent=msg}
+async function call(path,body){
+ const response=await fetch('/api/'+path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Pulse-Local':'1'},body:JSON.stringify(body)});
+ const data=await response.json();if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:'Invalid request');return data;
+}
+async function action(path,body){try{await call(path,body);notice('');await refresh()}catch(e){notice(e.message)}}
+$('start').onclick=()=>action('start',{rate:Number($('rate').value),duration:Number($('duration').value),concurrency:Number($('concurrency').value),pattern:$('pattern').value});
+$('stop').onclick=()=>action('stop',{});
+$('slow').onclick=()=>action('work',{backend:$('backend').value,iterations:Number($('work').value)});
+$('restore').onclick=()=>action('work',{backend:$('backend').value,iterations:1000});
+function node(tag,text,cls){const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n}
+function graph(rows){
+ const c=$('chart'),w=c.clientWidth,h=c.clientHeight,d=window.devicePixelRatio||1;if(!w||!h)return;
+ c.width=w*d;c.height=h*d;const x=c.getContext('2d');x.scale(d,d);
+ const left=44,right=w-12,top=12,bottom=h-26,max=Math.max(10,...rows.flatMap(r=>[r.offered,r.success]));
+ x.font='10px monospace';x.textAlign='right';
+ for(let i=0;i<=4;i++){const y=bottom-(bottom-top)*i/4;x.strokeStyle='#294244';x.beginPath();x.moveTo(left,y);x.lineTo(right,y);x.stroke();x.fillStyle='#a1b2ad';x.fillText(Math.round(max*i/4),left-6,y+3)}
+ for(const [key,color] of [['offered','#d3aa54'],['success','#80bd98']]){x.strokeStyle=color;x.lineWidth=2;x.beginPath();rows.forEach((r,i)=>{const px=left+(right-left)*i/Math.max(1,rows.length-1),py=bottom-(bottom-top)*r[key]/max;i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke()}
+ x.fillStyle='#a1b2ad';x.textAlign='left';x.fillText('Start',left,h-6);x.textAlign='right';x.fillText('Now',right,h-6);
+}
+function render(s){
+ current=s;$('state').textContent=s.state+' · '+s.elapsed+'s · '+s.inflight+' in flight';
+ $('start').disabled=s.running;$('stop').disabled=!s.running;
+ $('slow').disabled=$('restore').disabled=!s.workControl;
+ $('progress').style.width=Math.min(100,s.elapsed/Math.max(1,s.options.duration||1)*100)+'%';
+ const stat=$('stats');stat.replaceChildren();
+ for(const [label,value] of [['Offered',s.offered],['Completed',s.completed],['Success',s.success],['Errors',s.errors],['Cancelled',s.cancelled],['Generator drops',s.dropped],['Goodput req/s',s.goodput],['p50 / p95 ms',s.p50+' / '+s.p95],['p99 ms',s.p99]]){const d=node('div','','stat');d.append(node('small',label),node('b',String(value)));stat.append(d)}
+ $('workStatus').replaceChildren(...Object.entries(s.complexity).map(([k,v])=>node('div',k+' · '+v.toLocaleString()+' iterations')));
+ const shares=$('shares');shares.replaceChildren();const total=Object.values(s.backends).reduce((a,b)=>a+b,0);
+ for(const [k,v] of Object.entries(s.backends)){const percent=100*v/Math.max(1,total);const row=node('div','','row');row.append(node('span',k),node('span',v+' · '+percent.toFixed(1)+'%'));const meter=node('div','','meter');const fill=node('i','');fill.style.width=percent+'%';meter.append(fill);shares.append(row,meter)}
+ if(!total)shares.append(node('small','Waiting for responses'));
+ const recent=$('recent');recent.replaceChildren();for(const r of [...s.recent].reverse()){const tr=node('tr','');for(const v of [r.id,r.status||'Transport error',r.backend||'—',r.ms+' ms'])tr.append(node('td',String(v)));recent.append(tr)}
+ graph(s.history);
+}
+let polling=false;async function refresh(){if(polling)return;polling=true;try{render(await call('status'))}catch(e){notice(e.message)}finally{polling=false}}
+window.addEventListener('resize',()=>current&&graph(current.history));refresh();setInterval(refresh,700);
+</script></body></html>

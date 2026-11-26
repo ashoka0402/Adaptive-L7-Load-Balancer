@@ -5,7 +5,7 @@ Pulse forwards real HTTP traffic to independently running applications. FastAPI 
 ## Start Live Mode
 
 ```bash
-docker compose up --build -d load-balancer
+docker compose up --build -d traffic-center
 ```
 
 Open http://localhost:8080/pulse/ for monitoring. Compose starts three separate application containers that perform real SQLite reads and PBKDF2 CPU computation (no sleep). Send actual application requests:
@@ -65,3 +65,9 @@ python -m benchmarks.adaptive_proof --repetitions 1 --seconds 3 --output reports
 ```
 
 The original aiohttp implementation and historical benchmarks are preserved for comparison with `--legacy`. UI and architectural attribution: [codedpool/load-balancer](https://github.com/codedpool/load-balancer), [MIT notice](LICENSES/codedpool-MIT.txt). Upstream source remains in reference/codedpool. No historical measurement is claimed for this version.
+
+## Traffic Control Center
+
+Open http://localhost:8081/ in a second window alongside http://localhost:8080/pulse/. The center is a separate service that makes actual paced HTTP GET requests to the sample item API through the load balancer, not an in-process simulation. Choose 1–300 offered requests/sec, 5–120 seconds, up to 64 in-flight requests, and constant/ramp/burst patterns. The center shows end-to-end client timings, generator drops, HTTP statuses and successful response distribution. Pulse continues to measure proxy-side traffic, including other external clients.
+
+To demonstrate adaptive routing, select latency-aware on Pulse, start constant traffic, increase backend-2 CPU work in the center, watch redistribution, then restore it. No sleep is injected by the center. Compare the same scenario under Round Robin. Work controls are for the bundled sample applications only. Compose sets an internal shared workload-control token (override with PULSE_BENCHMARK_TOKEN); no token is required in the browser, and the control endpoint is blocked at the proxy. Both browser ports are loopback only. For a formal repeatable comparison, use the independent adaptive_proof runner.

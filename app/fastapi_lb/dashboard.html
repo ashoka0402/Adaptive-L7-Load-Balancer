@@ -256,6 +256,7 @@
 
   <nav class="lab-nav" aria-label="Pulse sections">
     <a href="#dashboard">Dashboard</a><a href="#chaosLab">Chaos Lab</a><a href="#battleLab">Battle Arena</a><a href="#inspectorLab">Request Inspector</a>
+    <a id="trafficCenterLink" href="http://localhost:8081/" target="_blank" rel="noopener">Traffic Control Center ↗</a>
   </nav>
   <section class="readouts" id="dashboard">
     <div class="ro live"><span class="lab">throughput</span><span class="rv serif" id="rps">0<i>req/s</i></span></div>
@@ -395,7 +396,7 @@
     $('strategy').value = s.strategy;
     if(s.mode) {
       $('modeBadge').textContent = s.mode === 'live' ? 'LIVE MODE' : 'LABORATORY MODE';
-      $('trafficSource').textContent = s.demo ? 'Controlled test workload · actual HTTP' : 'External HTTP clients only · no generated traffic';
+      $('trafficSource').textContent = s.demo ? 'Controlled test workload · actual HTTP' : 'External HTTP clients · actual requests only';
       const t=s.timing||{};
       $('routeTiming').textContent=t.samples ? t.routing_p50_us+' / '+t.routing_p95_us+' µs' : '—';
       $('upstreamTiming').textContent=t.samples ? t.upstream_p50_ms+' / '+t.upstream_p95_ms+' ms' : '—';
