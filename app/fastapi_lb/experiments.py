@@ -6,9 +6,7 @@ import time
 from collections import deque
 from contextlib import suppress
 
-import httpx
-
-from app.fastapi_lb.lab import Demo
+from app.fastapi_lb.lab import Demo, external_workload
 from app.fastapi_lb.proxy import Proxy
 from app.fastapi_lb.routing import STRATEGIES
 from app.fastapi_lb.telemetry import percentile
@@ -70,53 +68,7 @@ class Experiments:
 
     async def workload(self, count: int, workers: int, rate: int = 0) -> dict:
         """Open-loop paced arrivals with a bounded in-flight cap; no external target."""
-        started = time.monotonic()
-        latency: list[float] = []
-        successes = 0
-        rejected = 0
-        dropped = 0
-        next_id = 0
-        async with httpx.AsyncClient(timeout=7, trust_env=False,
-                                     limits=httpx.Limits(max_connections=workers)) as client:
-            async def request() -> None:
-                nonlocal successes, rejected
-                t = time.monotonic()
-                try:
-                    response = await client.get(self.demo.target)
-                    successes += int(response.is_success)
-                    rejected += int(response.status_code in (429, 503))
-                except httpx.HTTPError:
-                    pass
-                latency.append((time.monotonic()-t)*1000)
-
-            if rate:
-                pending: set[asyncio.Task] = set()
-                try:
-                    for i in range(count):
-                        await asyncio.sleep(max(0, started + i/rate-time.monotonic()))
-                        pending = {task for task in pending if not task.done()}
-                        if len(pending) >= workers:
-                            dropped += 1
-                        else:
-                            pending.add(asyncio.create_task(request()))
-                    await asyncio.gather(*pending)
-                finally:
-                    for task in pending:
-                        task.cancel()
-                    await asyncio.gather(*pending, return_exceptions=True)
-            else:
-                async def worker() -> None:
-                    nonlocal next_id
-                    while next_id < count:
-                        next_id += 1
-                        await request()
-                await asyncio.gather(*(worker() for _ in range(workers)))
-        elapsed = max(.001, time.monotonic()-started)
-        return {"offered": count, "completed": len(latency), "success": successes,
-                "rps": round(successes/elapsed, 1), "p95": percentile(latency,.95),
-                "p99": percentile(latency,.99), "successPct": round(100*successes/count,1),
-                "rejected": rejected, "generatorDropped": dropped,
-                "elapsed": round(elapsed,2)}
+        return await external_workload(self.demo.target,count,workers,rate)
 
     def configure_scenario(self, scenario: str) -> None:
         for b in self.pool.backends:

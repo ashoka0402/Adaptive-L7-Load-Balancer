@@ -2,14 +2,62 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import multiprocessing as mp
+import sys
 import time
 from contextlib import suppress
 
-import httpx
-from aiohttp import web
-
+from app.fastapi_lb.lab_origin import FAULTS, serve_origin
 from app.fastapi_lb.routing import Backend, Pool, STRATEGIES
-from app.fastapi_lb.telemetry import Telemetry, percentile
+from app.fastapi_lb.telemetry import Telemetry
+
+
+class ProcessBackend(Backend):
+    """Propagate local lab controls to an independently running origin."""
+    def __setattr__(self, name, value):
+        super().__setattr__(name, value)
+        shared = self.__dict__.get("shared")
+        if shared is not None and name in {"fault","disabled","fault_count"}:
+            with shared.get_lock():
+                if name == "fault":
+                    shared[0] = FAULTS.index(value)
+                    shared[2] += 1
+                elif name == "disabled":
+                    shared[1] = int(value)
+                elif value == 0:
+                    shared[2] += 1
+
+
+async def stop_process(process) -> None:
+    if process.is_alive():
+        process.terminate()
+        await asyncio.to_thread(process.join, 3)
+    if process.is_alive():
+        process.kill()
+        await asyncio.to_thread(process.join, 3)
+    else:
+        await asyncio.to_thread(process.join)
+    process.close()
+
+
+async def external_workload(target: str, count: int, workers: int,
+                            rate: int = 0, duration: float = 0) -> dict:
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "app.fastapi_lb.load_worker", "--target", target,
+        "--count", str(count), "--workers", str(workers), "--rate", str(rate),
+        "--duration", str(duration), stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        output, error = await process.communicate()
+        if process.returncode:
+            raise RuntimeError("External load generator failed: "+error.decode(errors="replace")[-300:])
+        return json.loads(output)
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
 
 
 class Demo:
@@ -17,7 +65,7 @@ class Demo:
         self.pool = pool
         self.telemetry = telemetry
         self.target = target
-        self.runners: dict[str, web.AppRunner] = {}
+        self.runners: dict = {}
         self.next_id = 0
         self.breaker_enabled = True
         self.task: asyncio.Task | None = None
@@ -39,40 +87,30 @@ class Demo:
             raise ValueError("maximum six demo backends")
         index = self.next_id
         self.next_id += 1
-        backend = Backend(chr(65 + index) if index < 26 else f"N{index}",
+        backend = ProcessBackend(chr(65 + index) if index < 26 else f"N{index}",
                           "", weight=index % 3 + 1, version=version,
                           breaker_enabled=self.breaker_enabled)
         delay = (4, 12, 22, 45, 8, 16)[index % 6]
 
-        async def handle(request: web.Request) -> web.Response:
-            if request.path == "/health":
-                return web.Response(status=503 if backend.disabled else 200)
-            if backend.disabled:
-                return web.Response(status=503, text="Demo backend offline")
-            backend.fault_count += 1
-            fault = backend.fault
-            await asyncio.sleep((delay + (250 if fault in {"slow", "timeout"} else 0)) / 1000)
-            if fault == "timeout":
-                await asyncio.sleep(5.5)
-            if fault == "error" or (fault == "flaky" and backend.fault_count % 3 == 0):
-                return web.Response(status=500, text="Injected failure")
-            if fault == "unavailable":
-                return web.Response(status=503, text="Injected unavailable")
-            return web.Response(text=backend.id, headers={"X-Backend": backend.id})
-
-        app = web.Application()
-        app.router.add_route("*", "/{path:.*}", handle)
-        runner = web.AppRunner(app, access_log=None)
-        await runner.setup()
-        site = web.TCPSite(runner, "127.0.0.1", 0)
+        context = mp.get_context("spawn")
+        backend.shared = context.Array("i", [0,0,0])
+        receive, send = context.Pipe(duplex=False)
+        process = context.Process(target=serve_origin,
+                                  args=(backend.id, delay, backend.shared, send),
+                                  daemon=True)
+        process.start()
+        send.close()
         try:
-            await site.start()
-            port = runner.addresses[0][1]
+            if not await asyncio.to_thread(receive.poll, 10):
+                raise RuntimeError("Lab origin startup timed out")
+            port = receive.recv()
         except BaseException:
-            await runner.cleanup()
+            await stop_process(process)
             raise
+        finally:
+            receive.close()
         backend.url = f"http://127.0.0.1:{port}"
-        self.runners[backend.id] = runner
+        self.runners[backend.id] = process
         self.pool.backends.append(backend)
         self.telemetry.event(f"Backend {backend.id} added ({delay} ms base delay)", "good")
         return backend
@@ -89,27 +127,17 @@ class Demo:
             self.pool.backends.remove(backend)
         runner = self.runners.pop(backend.id, None)
         if runner:
-            await runner.cleanup()
+            await stop_process(runner)
         self.telemetry.event(f"Backend {backend.id} drained and removed")
         return True
 
     async def load(self, workers: int, duration: float = 60.0) -> None:
-        deadline = time.monotonic() + duration
-        async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
-            async def worker() -> None:
-                while time.monotonic() < deadline:
-                    try:
-                        await client.get(self.target)
-                    except httpx.HTTPError:
-                        pass
-                    # Bound the maximum request rate and allow other coroutines to run.
-                    await asyncio.sleep(0.01)
-            await asyncio.gather(*(worker() for _ in range(workers)))
+        await external_workload(self.target,100000,workers,duration=duration)
 
     async def stop(self) -> None:
         if self.task is not None:
             self.task.cancel()
-            with suppress(asyncio.CancelledError):
+            with suppress(asyncio.CancelledError, RuntimeError):
                 await self.task
             self.task = None
 
@@ -117,39 +145,15 @@ class Demo:
         previous = self.pool.strategy
         self.arena = []
         try:
-            async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
-                for strategy in STRATEGIES:
-                    self.pool.strategy = strategy
-                    self.pool.cursor = self.pool.selections = 0
-                    for b in self.pool.backends:
-                        b.current_weight = 0
-                        b.ewma = 0
-                    self.telemetry.event(f"Arena: {strategy}")
-                    counter = 0
-                    durations: list[float] = []
-                    successes = 0
-                    started = time.monotonic()
-
-                    async def worker() -> None:
-                        nonlocal counter, successes
-                        while counter < 240:
-                            counter += 1
-                            t0 = time.monotonic()
-                            try:
-                                response = await client.get(self.target)
-                                successes += int(response.is_success)
-                            except httpx.HTTPError:
-                                pass
-                            durations.append((time.monotonic() - t0) * 1000)
-
-                    await asyncio.gather(*(worker() for _ in range(workers)))
-                    elapsed = max(time.monotonic() - started, 0.001)
-                    self.arena.append({
-                        "strategy": strategy, "rps": round(len(durations) / elapsed),
-                        "p95": percentile(durations, .95),
-                        "successPct": round(100 * successes / len(durations), 1),
-                    })
-                    await asyncio.sleep(.5)
+            for strategy in STRATEGIES:
+                self.pool.strategy = strategy
+                self.pool.cursor = self.pool.selections = 0
+                for b in self.pool.backends:
+                    b.current_weight = 0
+                    b.ewma = 0
+                self.telemetry.event(f"Arena: {strategy}")
+                result = await external_workload(self.target,240,workers)
+                self.arena.append(dict(result,strategy=strategy))
         finally:
             self.pool.strategy = previous
             self.telemetry.event("Arena finished", "good")
@@ -161,4 +165,5 @@ class Demo:
             with suppress(asyncio.CancelledError):
                 await self.arena_task
         for runner in self.runners.values():
-            await runner.cleanup()
+            await stop_process(runner)
+        self.runners.clear()

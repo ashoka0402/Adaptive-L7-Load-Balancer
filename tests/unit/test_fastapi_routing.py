@@ -45,3 +45,18 @@ def test_breaker_excludes_after_failures():
     assert b.active == 0
     assert b.breaker == "open"
     assert not b.available
+
+
+def test_latency_aware_explores_stale_backend():
+    import time
+
+    from app.fastapi_lb.routing import Backend, Pool
+
+    a = Backend("a", "http://a", ewma=2, last_selected=time.monotonic())
+    b = Backend("b", "http://b", ewma=200, last_selected=time.monotonic()-3)
+    pool = Pool([a,b], "latency_aware")
+    trace = {}
+    selected = pool.select(trace=trace)
+    assert selected is b
+    assert trace["decision"] == "stale latency exploration"
+    b.finish(2, True)

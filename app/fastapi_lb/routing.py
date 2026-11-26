@@ -31,6 +31,9 @@ class Backend:
     version: str = "v1"
     fault: str = "normal"
     fault_count: int = 0
+    assigned: int = 0
+    last_selected: float = 0.0
+    health_path: str | None = "/health"
 
     @property
     def breaker(self) -> str:
@@ -49,6 +52,8 @@ class Backend:
 
     def begin(self) -> None:
         self.active += 1
+        self.assigned += 1
+        self.last_selected = time.monotonic()
         if self.breaker == "half_open":
             self.probing = True
 
@@ -136,10 +141,13 @@ class Pool:
             if unknown:
                 reason = "cold-start exploration"
                 chosen = unknown[0]
+            elif stale := [b for b in candidates if b.last_selected and
+                           not b.active and time.monotonic()-b.last_selected >= 2]:
+                reason = "stale latency exploration"
+                chosen = min(stale, key=lambda b: b.last_selected)
             elif self.selections % 20 == 0:
                 reason = "periodic exploration"
-                chosen = candidates[self.cursor % len(candidates)]
-                self.cursor += 1
+                chosen = min(candidates, key=lambda b: b.last_selected)
             else:
                 chosen = min(
                     candidates, key=lambda b: (b.ewma or 50) * (1 + b.active)

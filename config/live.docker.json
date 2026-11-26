@@ -1,0 +1,29 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8080
+  },
+  "routes": [
+    {
+      "prefix": "/",
+      "strategy": "latency_aware",
+      "backends": [
+        {
+          "id": "backend-1",
+          "url": "http://backend-1:8001",
+          "health_path": "/health"
+        },
+        {
+          "id": "backend-2",
+          "url": "http://backend-2:8002",
+          "health_path": "/health"
+        },
+        {
+          "id": "backend-3",
+          "url": "http://backend-3:8003",
+          "health_path": "/health"
+        }
+      ]
+    }
+  ]
+}

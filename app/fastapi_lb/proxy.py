@@ -36,7 +36,7 @@ def clean_headers(
             b"x-forwarded-host", b"x-forwarded-proto",
         }
     else:
-        blocked |= {b"x-backend"}
+        blocked |= {b"x-backend", b"x-pulse-routing-us", b"x-pulse-upstream-headers-ms"}
     return [(k.lower(), v) for k, v in raw if k.lower() not in blocked]
 
 
@@ -71,6 +71,8 @@ class Proxy:
         self.rate_tokens = 200.0
         self.rate_last = time.monotonic()
         self.trace_enabled = False
+        self.trace_every = 1
+        self.request_sequence = 0
 
     def record(self, request: Request, start: float, status: int, backend: str = "") -> None:
         ms = (time.monotonic() - start) * 1000
@@ -87,7 +89,8 @@ class Proxy:
     async def handle(self, request: Request) -> Response:
         start = time.monotonic()
         trace = None
-        if self.trace_enabled:
+        self.request_sequence += 1
+        if self.trace_enabled and (self.request_sequence == 1 or self.request_sequence % self.trace_every == 0):
             self.telemetry.trace_sequence += 1
             trace = {"id": self.telemetry.trace_sequence, "method": request.method,
                      "ts": int(time.time()*1000), "attempts": []}
@@ -133,9 +136,13 @@ class Proxy:
                     self.retry_tokens -= 1
                     metrics.RETRIES.inc()
                 decision: dict = {}
+                routing_started = time.perf_counter_ns()
                 backend = pool.select(request.client.host if request.client else "", excluded,
                                       decision if trace is not None else None)
+                routing_us = (time.perf_counter_ns() - routing_started) / 1000
+                self.telemetry.routing_us.append(routing_us)
                 if trace is not None:
+                    decision["routing_us"] = round(routing_us, 2)
                     trace["attempts"].append(decision)
                 if backend is None:
                     break
@@ -159,6 +166,8 @@ class Proxy:
                         request.method, target, headers=headers, content=bytes(body)
                     )
                     response = await self.client.send(upstream, stream=True)
+                    headers_ms = (time.monotonic() - sent) * 1000
+                    self.telemetry.upstream_headers_ms.append(headers_ms)
                     self.client.cookies.clear()
                     status = response.status_code
                     outcome = status < 500
@@ -187,7 +196,7 @@ class Proxy:
                             await upstream_response.aclose()
                         finally:
                             duration = (time.monotonic() - sent) * 1000
-                            selected.finish(duration, successful if completed else None)
+                            selected.finish(headers_ms, successful if completed else None)
                             self.active -= 1
                             metrics.ACTIVE_REQUESTS.dec()
                             metrics.BACKEND_REQUESTS.labels(
@@ -200,7 +209,9 @@ class Proxy:
 
                     result = ManagedStream(stream(), status, cleanup)
                     result.raw_headers = clean_headers(list(response.headers.raw)) + [
-                        (b"x-backend", backend.id.encode("ascii"))
+                        (b"x-backend", backend.id.encode("ascii")),
+                        (b"x-pulse-routing-us", f"{routing_us:.2f}".encode("ascii")),
+                        (b"x-pulse-upstream-headers-ms", f"{headers_ms:.2f}".encode("ascii")),
                     ]
                     transferred = keep = True
                     return result

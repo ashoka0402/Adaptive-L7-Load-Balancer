@@ -14,7 +14,7 @@ services:
       - backend-3
     environment:
       - PYTHONUNBUFFERED=1
-    command: ["python", "-m", "app.main", "--host", "0.0.0.0"]
+    command: ["python", "-m", "app.main", "--config", "config/live.docker.json", "--host", "0.0.0.0"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/pulse/"]
       interval: 10s
@@ -26,10 +26,7 @@ services:
     build:
       context: .
       dockerfile: backends/Dockerfile
-    environment:
-      - FAILURE_MODE=normal
-      - SLOW_MS=20
-    command: ["python", "-m", "backends.server", "--port", "8001", "--id", "backend-1", "--mode", "normal"]
+    command: ["python", "-m", "backends.workload", "--host", "0.0.0.0", "--port", "8001", "--id", "backend-1"]
     expose:
       - "8001"
     restart: unless-stopped
@@ -38,10 +35,7 @@ services:
     build:
       context: .
       dockerfile: backends/Dockerfile
-    environment:
-      - FAILURE_MODE=slow
-      - SLOW_MS=100
-    command: ["python", "-m", "backends.server", "--port", "8002", "--id", "backend-2", "--mode", "slow", "--slow-ms", "100"]
+    command: ["python", "-m", "backends.workload", "--host", "0.0.0.0", "--port", "8002", "--id", "backend-2"]
     expose:
       - "8002"
     restart: unless-stopped
@@ -50,10 +44,7 @@ services:
     build:
       context: .
       dockerfile: backends/Dockerfile
-    environment:
-      - FAILURE_MODE=normal
-      - SLOW_MS=20
-    command: ["python", "-m", "backends.server", "--port", "8003", "--id", "backend-3", "--mode", "normal"]
+    command: ["python", "-m", "backends.workload", "--host", "0.0.0.0", "--port", "8003", "--id", "backend-3"]
     expose:
       - "8003"
     restart: unless-stopped

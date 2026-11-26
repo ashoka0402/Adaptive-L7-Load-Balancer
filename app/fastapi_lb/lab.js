@@ -5,7 +5,7 @@
   const notice = msg => { el("labNotice").textContent = msg; };
   async function api(path, body) {
     try {
-      const r = await fetch("/api/lab/" + path, body === undefined ? {} : {
+      const r = await fetch("/pulse/api/lab/" + path, body === undefined ? {} : {
         method:"POST", headers:{"Content-Type":"application/json","X-Pulse-Local":"1"},
         body:JSON.stringify(body)
       });
@@ -57,7 +57,7 @@
       "#"+t.id+" · "+t.method+" · HTTP "+t.status+" · "+t.elapsed_ms+" ms",
       ...t.attempts.flatMap((a,i)=>[
         "", "Attempt "+(i+1)+" · "+a.strategy+" · "+(a.reason||""),
-        "Selected: "+(a.selected||"none")+" · "+(a.decision||"no eligible backend"),
+        "Selected: "+(a.selected||"none")+" · "+(a.decision||"no eligible backend")+" · "+(a.routing_us??"—")+" µs",
         ...(a.eligible_group?["Eligible group: "+a.eligible_group.join(", ")]:[]),
         ...(a.sampled?["Sampled: "+a.sampled.join(", ")]:[]),
         ...((a.candidates||[]).map(b=>b.id+": "+b.reason+", active="+b.active+", EWMA="+b.ewma_ms+"ms"+(a.scores?.[b.id]===undefined?"":", score="+a.scores[b.id]))),
@@ -107,7 +107,7 @@
   window.renderLab=s=>{
     latest=s;
     const lab=s.lab;
-    if(!lab){document.querySelectorAll(".lab-section button").forEach(b=>b.disabled=true);notice("Lab controls require local demo mode.");return;}
+    if(!lab){document.querySelectorAll("#chaosLab button,#battleLab button,#recordStart,#recordStop,#replayLoad,#replayPlay,#replayExport").forEach(b=>b.disabled=true);el("replayState").textContent="Recording available in Laboratory Mode";return;}
     const select=el("faultBackend"), ids=s.backends.map(b=>b.id).join(",");
     if(ids!==selectedBackend){const prior=select.value;select.replaceChildren();for(const b of s.backends)select.add(new Option(b.id+" · "+(b.version||"v1"),b.id));if(s.backends.some(b=>b.id===prior))select.value=prior;selectedBackend=ids;}
     el("faultState").textContent=s.backends.map(b=>b.id+": "+(b.dead?"offline":b.fault||"normal")).join(" · ");

@@ -29,7 +29,7 @@ def test_routing_trace_and_canary_split():
 
 
 def test_demo_policy_fault_trace_replay_and_rollback():
-    with TestClient(create_app(), base_url="http://localhost") as client:
+    with TestClient(create_app(lab=True), base_url="http://localhost") as client:
         headers = {"X-Pulse-Local": "1"}
 
         def post(path, data):

@@ -26,6 +26,7 @@ from app.metrics import prometheus as metrics
 LOCAL_HOST = re.compile(r"(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?", re.I)
 SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")
 DASHBOARD = Path(__file__).with_name("dashboard.html")
+DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "config/live.local.json"
 
 
 class LoadOptions(BaseModel):
@@ -111,7 +112,12 @@ def configured_routes(path: str) -> dict[str, Pool]:
             ):
                 raise ValueError("invalid backend specification")
             used.add(backend_id)
-            backends.append(Backend(backend_id, url.rstrip("/"), weight))
+            health = spec.get("health_path", "/health")
+            if health is not None and (not isinstance(health, str) or
+                                       not re.fullmatch(r"/(?!/)[^\s?#]*", health)):
+                raise ValueError("invalid health path")
+            backends.append(Backend(backend_id, url.rstrip("/"), weight,
+                                    health_path=health))
         if not backends:
             raise ValueError("empty backend pool")
         routes[prefix] = Pool(backends, strategy)
@@ -122,9 +128,12 @@ def configured_routes(path: str) -> dict[str, Pool]:
 
 def create_app(
     config: str | None = None, port: int = 8080, strategy: str | None = None,
+    *, lab: bool = False,
 ) -> FastAPI:
     telemetry = Telemetry()
-    routes = configured_routes(config) if config else {"/": Pool([])}
+    if lab and config:
+        raise ValueError("Lab does not accept external destinations")
+    routes = {"/": Pool([], "latency_aware")} if lab else configured_routes(config or str(DEFAULT_CONFIG))
     primary = next(iter(routes.values()))
     if strategy:
         if strategy not in STRATEGIES:
@@ -134,17 +143,19 @@ def create_app(
     for prefix, pool in routes.items():
         trie.insert(prefix, pool)
     demo = Demo(primary, telemetry, f"http://127.0.0.1:{port}/api/test")
-    is_demo = config is None
+    is_demo = lab
     add_lock = asyncio.Lock()
     proxy: Proxy
     experiments: Experiments
 
     async def health_loop(client: httpx.AsyncClient) -> None:
         async def probe(backend: Backend) -> None:
+            if backend.health_path is None:
+                return
             previous = backend.alive
             try:
                 r = await asyncio.wait_for(
-                    client.send(httpx.Request("GET", backend.url + "/health")), timeout=1
+                    client.send(httpx.Request("GET", backend.url + backend.health_path)), timeout=1
                 )
                 client.cookies.clear()
                 backend.alive = r.is_success
@@ -190,16 +201,24 @@ def create_app(
             limits=httpx.Limits(max_connections=120, max_keepalive_connections=60),
             timeout=httpx.Timeout(5, connect=2),
             follow_redirects=False, trust_env=False,
-        ) as client:
+        ) as client, httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=100,max_keepalive_connections=20),
+            timeout=1, follow_redirects=False, trust_env=False,
+        ) as health_client:
             if is_demo:
-                for _ in range(4):
-                    await demo.add_backend()
+                try:
+                    for _ in range(4):
+                        await demo.add_backend()
+                except BaseException:
+                    await demo.close()
+                    raise
             proxy = Proxy(trie, client, telemetry)
-            proxy.trace_enabled = is_demo
+            proxy.trace_enabled = True
+            proxy.trace_every = 20
             experiments = Experiments(demo, proxy, add_lock)
             app.state.proxy = proxy
             app.state.experiments = experiments
-            tasks = [asyncio.create_task(health_loop(client)), asyncio.create_task(tick())]
+            tasks = [asyncio.create_task(health_loop(health_client)), asyncio.create_task(tick())]
             try:
                 yield
             finally:
@@ -232,6 +251,12 @@ def create_app(
             "running": demo.running, "arenaRunning": demo.arena_running or experiments.busy,
             "lab": experiments.state_view() if is_demo else None,
             "arena": demo.arena, "demo": is_demo,
+            "mode": "laboratory" if is_demo else "live",
+            "traceEvery": proxy.trace_every,
+            "trafficShareMeaning": "completed successful requests over the last 3 seconds",
+            "timing": telemetry.timing_snapshot(),
+            "pools": [{"prefix": prefix, "strategy": pool.strategy,
+                       "backend_ids": [b.id for b in pool.backends]} for prefix,pool in routes.items()],
             "strategy": primary.strategy, "workers": demo.workers,
             "elapsed": round(time.monotonic() - demo.started) if demo.running else 0,
             "totals": {"total": telemetry.total, "ok": telemetry.ok,
@@ -245,12 +270,12 @@ def create_app(
                 "fault": b.fault, "version": b.version,
                 "alive": b.alive, "breaker": b.breaker, "active": b.active,
                 "latency": round(b.ewma, 1), "served": b.served,
+                "assigned": b.assigned, "url": b.url,
                 "share": round(100 * shares[b.id] / count),
             } for b in all_backends],
             "events": list(telemetry.events)[-25:],
         }
 
-    @app.get("/")
     @app.get("/pulse")
     @app.get("/pulse/")
     async def dashboard(request: Request):
@@ -268,7 +293,7 @@ def create_app(
         local(request)
         return FileResponse(DASHBOARD.with_name("lab.js"), media_type="text/javascript")
 
-    @app.get("/api/stream")
+    @app.get("/pulse/api/stream")
     async def stream(request: Request):
         local(request)
 
@@ -280,12 +305,12 @@ def create_app(
         return StreamingResponse(events(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache"})
 
-    @app.get("/admin/console")
+    @app.get("/pulse/api/console")
     async def console(request: Request):
         local(request)
         return JSONResponse(snapshot(), headers={"Cache-Control": "no-store"})
 
-    @app.post("/api/test/start")
+    @app.post("/pulse/api/test/start")
     async def start(request: Request, options: LoadOptions):
         local(request)
         if not is_demo or demo.arena_running or experiments.busy:
@@ -297,14 +322,16 @@ def create_app(
             telemetry.event(f"Load test started: {options.workers} workers, max 60s", "good")
         return {"ok": True}
 
-    @app.post("/api/test/stop")
+    @app.post("/pulse/api/test/stop")
     async def stop(request: Request):
         local(request)
+        if not is_demo:
+            raise HTTPException(403, "Laboratory only")
         await demo.stop()
         telemetry.event("Load test stopped")
         return {"ok": True}
 
-    @app.post("/api/strategy")
+    @app.post("/pulse/api/strategy")
     async def change_strategy(request: Request, options: StrategyOptions):
         local(request)
         if demo.arena_running or experiments.busy:
@@ -313,7 +340,7 @@ def create_app(
         telemetry.event(f"Strategy changed to {options.strategy}")
         return {"ok": True, "strategy": primary.strategy}
 
-    @app.post("/api/backend/add")
+    @app.post("/pulse/api/backend/add")
     async def add(request: Request):
         local(request)
         async with add_lock:
@@ -325,7 +352,7 @@ def create_app(
                 raise HTTPException(409, str(exc)) from exc
         return {"ok": True, "id": b.id}
 
-    @app.post("/api/backend/{backend_id}/toggle")
+    @app.post("/pulse/api/backend/{backend_id}/toggle")
     async def toggle(request: Request, backend_id: str):
         local(request)
         if not is_demo or demo.arena_running or experiments.busy:
@@ -340,7 +367,7 @@ def create_app(
                         "bad" if b.disabled else "good")
         return {"ok": True}
 
-    @app.post("/api/arena")
+    @app.post("/pulse/api/arena")
     async def arena(request: Request, options: LoadOptions):
         local(request)
         if not is_demo or demo.running or demo.arena_running or experiments.busy or experiments.scaling or primary.canary_percent:
@@ -355,7 +382,7 @@ def create_app(
         if idle and (experiments.busy or demo.arena_running):
             raise HTTPException(409, "An experiment is running")
 
-    @app.post("/api/lab/run")
+    @app.post("/pulse/api/lab/run")
     async def run_experiment(request: Request, options: ExperimentOptions):
         require_demo(request, idle=True)
         async with add_lock:
@@ -369,13 +396,13 @@ def create_app(
             ))
         return {"ok": True}
 
-    @app.post("/api/lab/stop")
+    @app.post("/pulse/api/lab/stop")
     async def stop_experiment(request: Request):
         require_demo(request)
         await experiments.close()
         return {"ok": True}
 
-    @app.post("/api/lab/fault")
+    @app.post("/pulse/api/lab/fault")
     async def fault(request: Request, options: FaultOptions):
         require_demo(request, idle=True)
         b = next((b for b in primary.backends if b.id == options.backend), None)
@@ -389,13 +416,13 @@ def create_app(
         telemetry.event(f"{b.id}: fault {options.fault}", "good" if options.fault == "normal" else "bad")
         return {"ok": True}
 
-    @app.post("/api/lab/policy")
+    @app.post("/pulse/api/lab/policy")
     async def policy(request: Request, options: PolicyOptions):
         require_demo(request, idle=True)
         experiments.set_policy(options.model_dump())
         return {"ok": True}
 
-    @app.post("/api/lab/scaling")
+    @app.post("/pulse/api/lab/scaling")
     async def scaling(request: Request, options: ScalingOptions):
         require_demo(request, idle=True)
         async with add_lock:
@@ -408,7 +435,7 @@ def create_app(
         telemetry.event("Autoscaler enabled" if options.enabled else "Autoscaler disabled")
         return {"ok": True}
 
-    @app.post("/api/lab/canary")
+    @app.post("/pulse/api/lab/canary")
     async def canary(request: Request, options: CanaryOptions):
         require_demo(request, idle=True)
         if experiments.scaling:
@@ -421,7 +448,7 @@ def create_app(
             raise HTTPException(409, str(exc)) from exc
         return {"ok": True}
 
-    @app.post("/api/lab/record/{action}")
+    @app.post("/pulse/api/lab/record/{action}")
     async def record(request: Request, action: Literal["start", "stop"]):
         require_demo(request, idle=True)
         if action == "start":
@@ -430,20 +457,35 @@ def create_app(
             experiments.recording = False
         return {"ok": True}
 
-    @app.get("/api/lab/replay")
+    @app.get("/pulse/api/lab/replay")
     async def replay(request: Request):
         require_demo(request)
         return {"frames": list(experiments.frames), "recording": experiments.recording}
 
-    @app.get("/api/lab/traces")
+    @app.get("/pulse/api/lab/traces")
     async def traces(request: Request):
-        require_demo(request)
+        local(request)
         return {"traces": list(reversed(telemetry.traces))}
 
-    @app.get("/metrics")
+    @app.get("/pulse/metrics")
     async def prometheus():
         data, content_type = metrics.metrics_response()
         return Response(data, headers={"Content-Type": content_type})
+
+    # Preserve historic lab API aliases without stealing application paths in Live Mode.
+    if is_demo:
+        app.add_api_route("/", dashboard, methods=["GET"], include_in_schema=False)
+        app.add_api_route("/admin/console", console, methods=["GET"], include_in_schema=False)
+        app.add_api_route("/metrics", prometheus, methods=["GET"], include_in_schema=False)
+        for registered in list(app.routes):
+            if registered.path.startswith("/pulse/api/") and registered.path != "/pulse/api/console":
+                app.add_api_route(registered.path.removeprefix("/pulse"), registered.endpoint,
+                                  methods=list(registered.methods), include_in_schema=False)
+
+    @app.api_route("/pulse/{path:path}", methods=sorted(METHODS), include_in_schema=False)
+    async def reserved(request: Request, path: str):
+        local(request)
+        raise HTTPException(404, "Unknown Pulse management path")
 
     @app.api_route("/{path:path}", methods=sorted(METHODS))
     async def forward(request: Request, path: str):
@@ -452,4 +494,5 @@ def create_app(
     return app
 
 
-app = create_app(os.getenv("PULSE_ROUTES") or None, int(os.getenv("PULSE_PORT", "8080")))
+app = create_app(os.getenv("PULSE_ROUTES") or None, int(os.getenv("PULSE_PORT", "8080")),
+                 lab=os.getenv("PULSE_MODE") == "lab")

@@ -202,6 +202,7 @@
     .graphwrap { height:var(--graph-height,380px); }
   }
 
+  [hidden] { display:none !important; }
   .lab-nav { display:flex; gap:8px; flex-wrap:wrap; padding:12px 24px; border-bottom:1px solid var(--line); }
   .lab-nav a { color:var(--muted); text-decoration:none; padding:9px 12px; border-radius:6px; border:1px solid var(--line); font-size:12px; }
   .lab-nav a:hover,.lab-nav a:focus-visible { color:var(--cream); border-color:var(--brass); }
@@ -234,7 +235,7 @@
   <header class="bar">
     <div class="brand">
       <span class="wordmark serif">Pulse<b>.</b></span>
-      <span class="sub">L7 signal router</span>
+      <span class="sub">L7 signal router</span><span class="lab" id="modeBadge">Connecting</span>
     </div>
     <div class="grow"></div>
     <div class="status"><span class="tick" id="tick"></span><span id="statusText">idle</span></div>
@@ -258,15 +259,24 @@
   </nav>
   <section class="readouts" id="dashboard">
     <div class="ro live"><span class="lab">throughput</span><span class="rv serif" id="rps">0<i>req/s</i></span></div>
-    <div class="ro"><span class="lab">latency p50</span><span class="rv serif" id="p50">0<i>ms</i></span></div>
-    <div class="ro"><span class="lab">latency p95</span><span class="rv serif" id="p95">0<i>ms</i></span></div><div class="ro"><span class="lab">latency p99</span><span class="rv serif" id="p99">0<i>ms</i></span></div>
+    <div class="ro"><span class="lab">proxy latency p50</span><span class="rv serif" id="p50">0<i>ms</i></span></div>
+    <div class="ro"><span class="lab">proxy latency p95</span><span class="rv serif" id="p95">0<i>ms</i></span></div><div class="ro"><span class="lab">proxy latency p99</span><span class="rv serif" id="p99">0<i>ms</i></span></div>
     <div class="ro"><span class="lab">success</span><span class="rv serif" id="success">100<i>%</i></span></div>
     <div class="ro"><span class="lab">requests</span><span class="rv serif" id="total">0</span></div>
   </section>
 
+  <section class="lab-section" id="timingPanel">
+    <div class="section-head"><h2>Measured latency breakdown</h2><span id="trafficSource">Waiting for live metrics</span></div>
+    <div class="lab-grid">
+      <article class="lab-card"><span class="lab">Routing decision · p50 / p95</span><h3 id="routeTiming">—</h3><p>Time spent choosing an eligible backend, not total proxy latency.</p></article>
+      <article class="lab-card"><span class="lab">Upstream response headers · p50 / p95</span><h3 id="upstreamTiming">—</h3><p>Network, upstream queueing and application work until headers arrive.</p></article>
+      <article class="lab-card"><span class="lab">Event-loop tick lag</span><h3 id="loopTiming">—</h3><p>Delay beyond the expected 500 ms telemetry tick; not a direct CPU measurement.</p></article>
+      <article class="lab-card"><span class="lab">Registered routes</span><div class="lab-pre" id="liveRoutes">—</div></article>
+    </div>
+  </section>
   <main class="stage">
     <div class="bay">
-      <div class="ph"><span class="t">Live traffic topology</span><span class="muted-note">Aggregate traffic flow</span></div><div class="graphwrap">
+      <div class="ph"><span class="t">Live traffic topology</span><span class="muted-note">Successful response share · last 3s</span></div><div class="graphwrap">
         <canvas id="graph" role="img" aria-label="Live load balancer topology; backend controls are also available in the backend list"></canvas>
         <div class="armed" id="armed">press run to send traffic through the router</div>
       </div>
@@ -315,7 +325,7 @@
   <section class="lab-section" id="inspectorLab">
     <div class="section-head"><h2>Request Inspector</h2><span>Routing decisions &amp; incident replay</span></div>
     <div class="lab-grid">
-      <article class="lab-card"><h3>Request X-Ray</h3><p>Inspect a recent request's actual selection, candidate state, score and retry attempts. No request body, URL or credentials retained.</p><div class="lab-controls"><button class="secondary" id="traceRefresh">Refresh traces</button><label>Request <select id="traceSelect"></select></label></div><div id="traceView" class="lab-pre">Generate traffic to collect traces.</div></article>
+      <article class="lab-card"><h3>Request X-Ray</h3><p>Inspect sampled real request selections (first request, then 1 in 20), candidate state, scores and retry attempts. No request body, URL or credentials retained.</p><div class="lab-controls"><button class="secondary" id="traceRefresh">Refresh traces</button><label>Request <select id="traceSelect"></select></label></div><div id="traceView" class="lab-pre">Generate traffic to collect traces.</div></article>
       <article class="lab-card"><h3>Incident time machine</h3><p>Capture up to 120 seconds of telemetry and events, scrub the timeline, or export the recording as JSON.</p><div class="lab-controls"><button class="secondary" id="recordStart">Record</button><button class="secondary" id="recordStop">Stop recording</button><button class="secondary" id="replayLoad">Load recording</button><button class="secondary" id="replayPlay">Play</button><button class="secondary" id="replayExport">Export JSON</button></div><div id="replayState" class="lab-status"></div><input class="lab-range" id="replaySlider" type="range" min="0" max="0" value="0" aria-label="Replay timeline"><div id="replayView" class="lab-pre">No recording loaded.</div></article>
     </div>
     <div id="labNotice" class="lab-status" role="status" aria-live="polite"></div>
@@ -383,6 +393,28 @@
     if (s.arenaRunning) $('arenaResult').textContent = 'Running real HTTP comparison…';
     else if (s.arena && s.arena.length) $('arenaResult').innerHTML = '<table><thead><tr><th>Algorithm</th><th>req/s</th><th>p95 ms</th><th>OK %</th></tr></thead><tbody>' + s.arena.map(r => '<tr><td>'+r.strategy+'</td><td>'+r.rps+'</td><td>'+r.p95+'</td><td>'+r.successPct+'</td></tr>').join('') + '</tbody></table>';
     $('strategy').value = s.strategy;
+    if(s.mode) {
+      $('modeBadge').textContent = s.mode === 'live' ? 'LIVE MODE' : 'LABORATORY MODE';
+      $('trafficSource').textContent = s.demo ? 'Controlled test workload · actual HTTP' : 'External HTTP clients only · no generated traffic';
+      const t=s.timing||{};
+      $('routeTiming').textContent=t.samples ? t.routing_p50_us+' / '+t.routing_p95_us+' µs' : '—';
+      $('upstreamTiming').textContent=t.samples ? t.upstream_p50_ms+' / '+t.upstream_p95_ms+' ms' : '—';
+      $('loopTiming').textContent=(t.loop_lag_ms??0)+' ms';
+      $('liveRoutes').textContent=(s.pools||[]).map(p=>p.prefix+' · '+p.strategy+' · '+p.backend_ids.join(', ')).join('\n');
+      $('chaosLab').hidden = !s.demo;
+      $('battleLab').hidden = !s.demo;
+      document.querySelectorAll('.lab-nav a[href="#chaosLab"],.lab-nav a[href="#battleLab"]').forEach(a=>a.hidden=!s.demo);
+      $('run').hidden=!s.demo;
+      $('workers').closest('label').hidden=!s.demo;
+      $('add').hidden=!s.demo;
+      $('arena').closest('.panel').hidden=!s.demo;
+      $('armed').textContent=s.demo?'press run to send traffic through the router':'send HTTP requests to your registered application routes';
+      if(!s.demo) {
+        $('armed').style.opacity=s.rps>0?'0':'1';
+        $('statusText').textContent=s.rps>0?'live · receiving HTTP traffic':'live · waiting for requests';
+        $('tick').className='tick'+(s.rps>0?' on':'');
+      }
+    }
     window.renderLab?.(s);
   }
 
@@ -581,11 +613,11 @@
       if (!r.ok) throw new Error('Action rejected ('+r.status+')');
     } catch(e) { $('statusText').textContent = e.message; }
   }
-  $('run').onclick = () => post('/api/test/' + (running ? 'stop' : 'start'), {workers:Number($('workers').value)});
-  $('strategy').onchange = e => post('/api/strategy', {strategy:e.target.value});
-  window.toggle = id => { if(latest?.demo && !latest.arenaRunning) return post('/api/backend/' + encodeURIComponent(id) + '/toggle'); };
-  $('add').onclick = () => post('/api/backend/add');
-  $('arena').onclick = () => post('/api/arena', {workers:Number($('workers').value)});
+  $('run').onclick = () => post('/pulse/api/test/' + (running ? 'stop' : 'start'), {workers:Number($('workers').value)});
+  $('strategy').onchange = e => post('/pulse/api/strategy', {strategy:e.target.value});
+  window.toggle = id => { if(latest?.demo && !latest.arenaRunning) return post('/pulse/api/backend/' + encodeURIComponent(id) + '/toggle'); };
+  $('add').onclick = () => post('/pulse/api/backend/add');
+  $('arena').onclick = () => post('/pulse/api/arena', {workers:Number($('workers').value)});
   function applyTheme(light) {
     document.body.classList.toggle('light',light);
     const s = getComputedStyle(document.body);
@@ -597,7 +629,7 @@
   try{applyTheme(localStorage.getItem('pulse-theme')==='light')}catch{applyTheme(false)}
 
 
-  const es = new EventSource('/api/stream');
+  const es = new EventSource('/pulse/api/stream');
   es.onmessage = (e) => { try { latest = JSON.parse(e.data); renderDOM(latest); } catch {} };
   es.onerror = () => { $('statusText').textContent = 'reconnecting…'; };
   requestAnimationFrame(frame);

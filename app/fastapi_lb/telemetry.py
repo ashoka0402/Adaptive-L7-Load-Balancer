@@ -24,6 +24,9 @@ class Telemetry:
         self.traces: deque[dict] = deque(maxlen=200)
         self.trace_sequence = 0
         self.outcomes: deque[tuple[float, str, int, float]] = deque(maxlen=20000)
+        self.routing_us: deque[float] = deque(maxlen=1024)
+        self.upstream_headers_ms: deque[float] = deque(maxlen=1024)
+        self.loop_lag_ms = 0.0
         self.last_tick = time.monotonic()
         self.last_total = 0
 
@@ -37,17 +40,37 @@ class Telemetry:
 
     def tick(self) -> None:
         now = time.monotonic()
-        recent = [x for x in self.samples if x[0] > self.last_tick]
+        self.loop_lag_ms = round(max(0.0, (now-self.last_tick-.5)*1000), 2)
+        recent = []
+        for x in reversed(self.samples):
+            if x[0] <= self.last_tick:
+                break
+            recent.append(x)
         elapsed = max(now - self.last_tick, 0.001)
         self.series["rps"].append(round((self.total - self.last_total) / elapsed))
+        ordered = sorted(x[1] for x in recent)
         for p in (50, 95, 99):
-            self.series[f"p{p}"].append(percentile([x[1] for x in recent], p / 100))
+            self.series[f"p{p}"].append(round(ordered[max(0, math.ceil(len(ordered)*p/100)-1)], 1) if ordered else 0)
         self.series["errors"].append(
             round(100 * sum(not x[2] for x in recent) / len(recent), 1) if recent else 0
         )
         self.last_total = self.total
         self.last_tick = now
 
+    def timing_snapshot(self) -> dict:
+        return {"routing_p50_us": percentile(list(self.routing_us), .5),
+                "routing_p95_us": percentile(list(self.routing_us), .95),
+                "upstream_p50_ms": percentile(list(self.upstream_headers_ms), .5),
+                "upstream_p95_ms": percentile(list(self.upstream_headers_ms), .95),
+                "loop_lag_ms": self.loop_lag_ms,
+                "samples": len(self.routing_us)}
+
     def shares(self) -> Counter:
         now = time.monotonic()
-        return Counter(x[3] for x in self.samples if x[0] >= now - 3 and x[2] and x[3])
+        result: Counter = Counter()
+        for x in reversed(self.samples):
+            if x[0] < now-3:
+                break
+            if x[2] and x[3]:
+                result[x[3]] += 1
+        return result

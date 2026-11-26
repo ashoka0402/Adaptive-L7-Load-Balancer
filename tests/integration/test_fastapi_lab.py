@@ -4,7 +4,7 @@ from app.fastapi_lb.server import create_app
 
 
 def test_fastapi_real_http_proxy_and_controls():
-    with TestClient(create_app(), base_url="http://localhost") as client:
+    with TestClient(create_app(lab=True), base_url="http://localhost") as client:
         assert client.get("/pulse/").status_code == 200
         assert client.post("/api/strategy", json={"strategy": "latency_aware"}).status_code == 403
         headers = {"X-Pulse-Local": "1"}

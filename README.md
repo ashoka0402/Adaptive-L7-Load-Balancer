@@ -1,71 +1,67 @@
-# Pulse — Layer 7 Load Balancer
+# Pulse — Adaptive Layer 7 Load Balancer
 
-A recruiter-friendly systems engineering lab, refactored around FastAPI, asynchronous HTTP forwarding and the signal-router dashboard from [codedpool/load-balancer](https://github.com/codedpool/load-balancer) (MIT, see [notice](LICENSES/codedpool-MIT.txt)). The original Node architecture is the basis for the Python port; not every upstream feature is ported. The full upstream text source is preserved in [reference/codedpool](reference/codedpool), pinned to commit 5da9ed5caa02b9e4adc0aef5fc0cbff4acac9362; four binary screenshots are omitted. The previous aiohttp implementation remains available for historical tests and comparisons.
+Pulse forwards real HTTP traffic to independently running applications. FastAPI is the proxy, HTTPX provides pooled upstream connections, and EWMA latency feedback with an outstanding-request penalty and periodic exploration adjusts routing. There are no generated requests or mock servers in **Live Mode**, which is the default.
 
-## Quick start
+## Start Live Mode
 
 ```bash
-python -m pip install -r requirements.txt
+docker compose up --build -d load-balancer
+```
+
+Open http://localhost:8080/pulse/ for monitoring. Compose starts three separate application containers that perform real SQLite reads and PBKDF2 CPU computation (no sleep). Send actual application requests:
+
+```bash
+curl http://localhost:8080/api/items/7
+curl http://localhost:8080/api/items/18
+```
+
+For local non-Docker use, install dependencies with `pip install -r requirements.txt`, launch each of the following commands in its own terminal, and then run the proxy:
+
+```bash
+python -m backends.workload --id backend-1 --port 8001
+python -m backends.workload --id backend-2 --port 8002
+python -m backends.workload --id backend-3 --port 8003
 python -m app.main
 ```
 
-Open http://127.0.0.1:8080/pulse/. Four actual loopback HTTP backends start automatically. No admin token or external services are needed. Start a bounded traffic test, change algorithms while it runs, take backends offline, add up to two new servers, or compare algorithms in the Battle Arena.
+### Register your own applications
 
-Docker: `docker compose up --build -d load-balancer`. Optional Prometheus and Grafana are available via the existing Compose services. The management interface is a local demo, not authenticated; never publish it to the internet.
+Edit the trusted route registry in `config/live.local.json` or supply `python -m app.main --config path/to/routes.json`. Each route contains a prefix, strategy and list of origins (id, URL, optional weight, optional health_path). Set health_path to null for passive-only health handling when an origin has no health endpoint. Longer segment prefixes win; path and query are forwarded unchanged. Registry changes take effect on restart. The dashboard's strategy selector changes the first route only; configure other route strategies in the registry. Live traffic comes exclusively from clients; dashboard requests and health probes do not count as proxied application requests. No arbitrary remote backend-registration API is exposed.
 
-## Architecture
+Keep the token-free management interface bound to loopback (the default or the Compose loopback port mapping). Do not expose it publicly. Management lives under /pulse/ and Prometheus under /pulse/metrics. The proxy supports HTTP, not WebSocket upgrades. State is single-process; origins and traffic generators are independent processes.
 
-```mermaid
-flowchart LR
-  Client --> FastAPI
-  FastAPI --> Admission[Fixed admission + retry budget]
-  Admission --> Trie[Longest-prefix route trie]
-  Trie --> Pool[Selectable backend pool]
-  Pool --> HTTPX[Async pooled HTTP client]
-  HTTPX --> A[Backend A]
-  HTTPX --> B[Backend B]
-  HTTPX --> C[Backend C]
-  A --> Telemetry
-  B --> Telemetry
-  C --> Telemetry
-  Telemetry --> SSE[Live dashboard]
-  Telemetry --> Prometheus
+## Prove adaptive behavior with actual measurements
+
+```bash
+python -m benchmarks.adaptive_proof --output reports/adaptive-proof.json
 ```
 
-| Algorithm | Selection |
-| --- | --- |
-| Round robin | Rotate through eligible nodes |
-| Weighted round robin | Smooth weighted rotation |
-| Least connections | Fewest in-flight requests |
-| Least latency | Minimum measured EWMA |
-| Least loaded | Active requests plus latency score |
-| Power of two | Choose the better of two random eligible nodes |
-| IP hash | Stable hash of client IP against current eligible list |
-| Latency aware | EWMA × (1 + active requests), with cold-start and periodic exploration |
+This command starts independent application and proxy processes and runs a paced external HTTP client. Each strategy sees normal, degraded, and recovery phases; the same SQL query is served throughout, while only origin B changes actual CPU work. No sleep or fabricated latency is injected. Strategy order alternates across repetitions and a new proxy starts for each run. The report records request-level timestamps/status/latency, per-second backend counts, p50/p95/p99, goodput, generator drops, process IDs, and direct-origin versus single-origin proxy measurements. Those last measurements are separate runs, not exact per-request proxy overhead.
 
-The dashboard displays request throughput, p50/p95/p99, recent error rate, backend share, health, circuit state and activity using bounded samples. Animated dots represent measured aggregate traffic share, not an individual request trace. The arena sends 240 real HTTP requests per algorithm with the same worker count and reports measured throughput, p95 and success. It is a local demonstration, not a controlled production benchmark; results depend on scheduling, connection reuse and current health.
+The experiment is controlled synthetic traffic hitting real applications, not real user traffic. The JSON output is evidence only after execution; no performance improvement or recovery time is assumed. A healthy but slower backend may still receive occasional requests so it can demonstrate recovery.
 
-## Structured code
+## Latency metrics
 
-- `app/fastapi_lb/server.py`: FastAPI lifespan, SSE, health probes, control endpoints.
-- `app/fastapi_lb/routing.py`: segment trie, backend state, circuit and strategy selection.
-- `app/fastapi_lb/proxy.py`: HTTPX forwarding, bounded request bodies, fixed concurrency shedding and GET/HEAD retries.
-- `app/fastapi_lb/lab.py`: real local demo backends, load and arena.
-- `app/fastapi_lb/telemetry.py`: bounded measurements.
-- `app/fastapi_lb/dashboard.html`: adapted upstream UI, with theme, metrics and arena.
+- Proxy request latency: ingress to completed response streaming, includes upstream wait and downstream streaming.
+- Routing decision: time inside the selection operation in microseconds, separately measured.
+- Upstream response headers: pool/network/application wait until headers arrive; EWMA uses these observed timings, not browser animation or an artificial delay.
+- Loop tick lag: elapsed delay beyond the expected telemetry tick; not CPU utilization.
+- Recent topology share: successful completed responses in the last three seconds. The animation is an aggregate visualization, not an individual trace.
+- Request X-Ray: first request then 1 in 20; no URL, body, or credentials recorded.
 
-To proxy your own locally configured HTTP services, run `python -m app.main --config config/routes.example.json`. Define route prefixes and trusted origins in a JSON/YAML file. The console reports all pools; the strategy selector changes the first configured pool. Demo traffic, server creation and toggles are disabled in configured mode. The route paths are forwarded unchanged. Use `--legacy` to run the previous aiohttp CLI.
+## Laboratory Mode (optional)
+
+```bash
+python -m app.main --lab
+```
+
+Explicit lab mode starts isolated local test origins and a separate HTTP generator process. All eight features remain: Breaking Point, Chaos Lab, Request X-Ray, scenario Arena, local autoscaling, bounded incident replay, canary rollout and rollback, resilience controls. Fault injection deliberately changes test behavior; lab results are not production user traffic. The dashboard disables destructive experiment controls in Live Mode. To run lab under Docker, use `docker compose run --rm --service-ports --no-deps load-balancer python -m app.main --lab --host 0.0.0.0` after stopping the live service.
 
 ## Verification
 
 ```bash
-python -m pytest tests/unit/test_fastapi_routing.py tests/integration/test_fastapi_lab.py -q
-python -m pytest -ra
+python -m pytest tests/unit/test_fastapi_routing.py tests/integration/test_fastapi_lab.py tests/integration/test_fastapi_experiments.py tests/integration/test_live_mode.py -q
+python -m benchmarks.adaptive_proof --repetitions 1 --seconds 3 --output reports/adaptive-smoke.json
 ```
 
-No new performance numbers are claimed. Fixed concurrency shedding replaces the upstream adaptive limiter. Redis rate limiting, multiprocess cluster coordination, hedged requests and automatic infrastructure autoscaling are not ported; server creation is manual and local. HTTPS upstreams use normal certificate validation. WebSocket upgrades are not supported. Historical benchmark files relate to the legacy implementation, not the FastAPI port.
-
-
-## Distributed systems laboratory
-
-Use the four console sections to run eight hands-on features. Chaos Lab can inject application-level latency, intermittent 500s, 503s, timeouts and outages on loopback backends. Breaking Point offers 50–800 requests/sec in bounded open-loop stages; generator drops are reported separately from proxy rejections. Arena runs all eight strategies under a selected scenario (normal, slow, outage, overload) using 240 requests per algorithm; winner prioritizes success rate, then p95, then throughput. Resilience compares all-enabled with each individual mechanism off; disabling admission retains a 160-request hard cap and disabling pooling requests connection closure. Autoscaling launches and drains real in-process local HTTP listeners (2–6 total, cooldown, no cloud infrastructure). Canary adds a separate v2 backend, adjustable allocation, optional staged auto-promotion, and rollback on an open circuit or measured error/latency breach (20 observations for the statistical check). Request Inspector retains 200 recent demo decisions without URLs, bodies or credentials. Incident replay stores at most 240 half-second snapshots in memory; download the JSON for retention. No packet-level network emulation or production deployment is implied. All experiment controls are local demo only; tests use bounded workloads and no external traffic.
+The original aiohttp implementation and historical benchmarks are preserved for comparison with `--legacy`. UI and architectural attribution: [codedpool/load-balancer](https://github.com/codedpool/load-balancer), [MIT notice](LICENSES/codedpool-MIT.txt). Upstream source remains in reference/codedpool. No historical measurement is claimed for this version.
