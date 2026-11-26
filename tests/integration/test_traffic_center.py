@@ -56,3 +56,44 @@ async def test_generator_real_tcp_requests_and_statistics():
     finally:
         server.close()
         await server.wait_closed()
+
+
+def test_chaos_controls_require_local_header_and_config(monkeypatch):
+    monkeypatch.delenv("PULSE_BENCHMARK_TOKEN",raising=False)
+    with TestClient(create_app(),base_url="http://localhost:8081") as client:
+        body={"backend":"backend-2","mode":"offline","duration":30}
+        assert client.post("/api/chaos",json=body).status_code==403
+        assert client.post("/api/chaos",json=body,headers={"X-Pulse-Local":"1"}).status_code==409
+        assert client.post("/api/chaos",json={**body,"duration":121},
+                           headers={"X-Pulse-Local":"1"}).status_code==422
+
+
+@pytest.mark.asyncio
+async def test_real_sample_origin_chaos_and_recovery():
+    from aiohttp.test_utils import TestClient as AioClient, TestServer
+    from backends.workload import create_workload
+    async with AioClient(TestServer(create_workload("test","secret"))) as client:
+        control="/__benchmark/chaos"
+        headers={"X-Benchmark-Token":"secret"}
+        assert (await client.post(control,json={"mode":"offline"})).status==404
+        for mode,health,item in [("offline",503,503),("unavailable",200,503),
+                                 ("error",200,500),("normal",200,200)]:
+            r=await client.post(control,json={"mode":mode,"duration":5},headers=headers)
+            assert r.status==200
+            assert (await client.get("/health")).status==health
+            assert (await client.get("/api/items/1")).status==item
+        await client.post(control,json={"mode":"flaky","duration":5},headers=headers)
+        assert [(await client.get("/api/items/1")).status for _ in range(3)]==[200,200,500]
+
+
+@pytest.mark.asyncio
+async def test_fault_auto_expires_without_controller():
+    from aiohttp.test_utils import TestClient as AioClient, TestServer
+    from backends.workload import create_workload
+    async with AioClient(TestServer(create_workload("test","secret"))) as client:
+        await client.post("/__benchmark/chaos",json={"mode":"offline","duration":5},
+                          headers={"X-Benchmark-Token":"secret"})
+        assert (await client.get("/health")).status==503
+        await asyncio.sleep(5.1)
+        assert (await client.get("/health")).status==200
+        assert (await client.get("/api/items/1")).status==200

@@ -117,6 +117,14 @@ jobs:
           sleep 7
           curl --fail http://127.0.0.1:8081/api/status | python -c 'import json,sys; s=json.load(sys.stdin); assert s["state"]=="completed" and s["success"]>0, s'
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/__benchmark/complexity)" = 404
+          curl --fail -H 'X-Pulse-Local: 1' -H 'Content-Type: application/json' -d '{"backend":"backend-2","mode":"offline","duration":30}' http://127.0.0.1:8081/api/chaos
+          sleep 3
+          curl --fail http://127.0.0.1:8080/pulse/api/console | python -c 'import json,sys; s=json.load(sys.stdin); assert not next(b for b in s["backends"] if b["id"]=="backend-2")["alive"], s'
+          curl --fail http://127.0.0.1:8080/api/items/7
+          curl --fail -X POST -H 'X-Pulse-Local: 1' http://127.0.0.1:8081/api/chaos/reset
+          sleep 3
+          curl --fail http://127.0.0.1:8080/pulse/api/console | python -c 'import json,sys; s=json.load(sys.stdin); assert next(b for b in s["backends"] if b["id"]=="backend-2")["alive"], s'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/__benchmark/chaos)" = 404
           test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: external.example' http://127.0.0.1:8080/pulse/api/console)" = 403
       - name: Run network-isolated Docker Arena
         run: |

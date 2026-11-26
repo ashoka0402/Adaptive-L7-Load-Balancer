@@ -35,6 +35,12 @@ class WorkOptions(BaseModel):
     iterations: int = Field(default=1000, ge=1000, le=300000)
 
 
+class ChaosOptions(BaseModel):
+    backend: Literal["backend-1", "backend-2", "backend-3"]
+    mode: Literal["normal","offline","unavailable","error","flaky","timeout","disconnect"]
+    duration: int = Field(default=30, ge=5, le=120)
+
+
 def guard(request: Request, *, page: bool = False) -> None:
     host = request.headers.get("host", "")
     origin = request.headers.get("origin")
@@ -175,29 +181,76 @@ def create_app() -> FastAPI:
     token = os.getenv("PULSE_BENCHMARK_TOKEN","")
     complexity = dict.fromkeys(SAMPLE_IDS,1000)
     lock = asyncio.Lock()
+    chaos_state: dict = {b:{'mode':'unknown','remaining':0} for b in SAMPLE_IDS}
+    events: deque[dict] = deque(maxlen=40)
+
+    def origin_url(backend: str) -> str:
+        index = SAMPLE_IDS.index(backend)+1
+        hostname = backend if u.hostname == 'load-balancer' else '127.0.0.1'
+        return f'http://{hostname}:{8000+index}'
 
     async def set_work(backend: str, iterations: int) -> None:
         if not token:
             raise HTTPException(409,"Sample workload control requires the Compose setup")
-        index = SAMPLE_IDS.index(backend)+1
-        hostname = backend if u.hostname == "load-balancer" else "127.0.0.1"
         try:
             async with httpx.AsyncClient(timeout=4,trust_env=False) as client:
-                response = await client.post(f"http://{hostname}:{8000+index}/__benchmark/complexity",
+                response = await client.post(origin_url(backend)+"/__benchmark/complexity",
                     json={"iterations":iterations},headers={"X-Benchmark-Token":token})
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             raise HTTPException(502,"Sample backend control unavailable") from exc
         complexity[backend] = iterations
 
+    async def backend_chaos(backend: str, mode: str | None = None,
+                            duration: int = 30) -> dict:
+        if not token:
+            raise HTTPException(409,"Sample chaos controls require the Compose setup")
+        try:
+            async with httpx.AsyncClient(timeout=3,trust_env=False) as client:
+                url = origin_url(backend)+"/__benchmark/chaos"
+                headers = {"X-Benchmark-Token":token}
+                if mode is None:
+                    response = await client.get(url,headers=headers)
+                else:
+                    response = await client.post(url,headers=headers,
+                                                 json={"mode":mode,"duration":duration})
+                response.raise_for_status()
+                result = response.json()
+        except (httpx.HTTPError,ValueError) as exc:
+            chaos_state[backend] = {"mode":"unknown","remaining":0}
+            raise HTTPException(502,"Sample backend chaos control unavailable") from exc
+        previous = chaos_state[backend]["mode"]
+        chaos_state[backend] = result
+        if mode is not None or previous not in ("unknown",result["mode"]):
+            events.append({"ts":time.time(),"backend":backend,"mode":result["mode"],
+                           "source":"operator" if mode is not None else "observed"})
+        return result
+
+    async def poll_faults() -> None:
+        while True:
+            async with lock:
+                await asyncio.gather(*(backend_chaos(b) for b in SAMPLE_IDS),
+                                     return_exceptions=True)
+            await asyncio.sleep(1)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        yield
-        await generator.stop()
-        for backend,value in complexity.items():
-            if value != 1000:
-                with suppress(HTTPException):
-                    await set_work(backend,1000)
+        poller = asyncio.create_task(poll_faults()) if token else None
+        try:
+            yield
+        finally:
+            if poller is not None:
+                poller.cancel()
+                with suppress(asyncio.CancelledError):
+                    await poller
+            await generator.stop()
+            if token:
+                await asyncio.gather(*(backend_chaos(b,"normal") for b in SAMPLE_IDS),
+                                     return_exceptions=True)
+            for backend,value in complexity.items():
+                if value != 1000:
+                    with suppress(HTTPException):
+                        await set_work(backend,1000)
 
     app = FastAPI(title="Pulse Traffic Control Center",lifespan=lifespan,
                   docs_url=None,redoc_url=None,openapi_url=None)
@@ -213,7 +266,8 @@ def create_app() -> FastAPI:
     @app.get("/api/status")
     async def status(request: Request):
         guard(request)
-        return dict(generator.snapshot(),complexity=complexity,workControl=bool(token))
+        return dict(generator.snapshot(),complexity=complexity,workControl=bool(token),
+                    chaos=chaos_state,chaosEvents=list(events))
 
     @app.post("/api/start")
     async def start(request: Request, options: TrafficOptions):
@@ -237,6 +291,24 @@ def create_app() -> FastAPI:
         guard(request)
         async with lock:
             await set_work(options.backend,options.iterations)
+        return {"ok":True}
+
+    @app.post("/api/chaos")
+    async def chaos(request: Request, options: ChaosOptions):
+        guard(request)
+        async with lock:
+            result = await backend_chaos(options.backend,options.mode,options.duration)
+        return {"ok":True,**result}
+
+    @app.post("/api/chaos/reset")
+    async def reset_chaos(request: Request):
+        guard(request)
+        async with lock:
+            results = await asyncio.gather(*(backend_chaos(b,"normal") for b in SAMPLE_IDS),
+                                           return_exceptions=True)
+        failed = [b for b,result in zip(SAMPLE_IDS,results) if isinstance(result,BaseException)]
+        if failed:
+            raise HTTPException(502,"Could not reset: "+", ".join(failed))
         return {"ok":True}
 
     return app

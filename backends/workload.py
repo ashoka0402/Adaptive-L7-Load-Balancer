@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import time
 import hashlib
 import hmac
 import os
@@ -17,11 +19,33 @@ def create_workload(backend_id: str, benchmark_token: str = "") -> web.Applicati
                    [(i, f"Item {i}", i*3) for i in range(1,101)])
     db.commit()
     iterations = 1000
+    fault = 'normal'
+    fault_until = 0.0
+    fault_count = 0
+
+    def active_fault() -> str:
+        return fault if time.monotonic() < fault_until else 'normal'
 
     async def health(request: web.Request) -> web.Response:
+        if active_fault() == "offline":
+            return web.json_response({"status":"unavailable","backend":backend_id},status=503)
         return web.json_response({"status":"ok","backend":backend_id})
 
     async def item(request: web.Request) -> web.Response:
+        nonlocal fault_count
+        mode = active_fault()
+        fault_count += 1
+        if mode == "offline" or mode == "unavailable":
+            raise web.HTTPServiceUnavailable()
+        if mode == "error" or (mode == "flaky" and fault_count % 3 == 0):
+            raise web.HTTPInternalServerError()
+        if mode == "timeout":
+            await asyncio.sleep(6)
+            raise web.HTTPGatewayTimeout()
+        if mode == "disconnect":
+            if request.transport is not None:
+                request.transport.abort()
+            return web.Response(status=503)
         try:
             item_id = int(request.match_info.get("item_id","1"))
         except ValueError:
@@ -46,6 +70,30 @@ def create_workload(backend_id: str, benchmark_token: str = "") -> web.Applicati
         iterations = value
         return web.json_response({"iterations":iterations})
 
+    async def chaos(request: web.Request) -> web.Response:
+        nonlocal fault, fault_until, fault_count
+        if not benchmark_token or not hmac.compare_digest(
+            request.headers.get("X-Benchmark-Token",""),benchmark_token
+        ):
+            raise web.HTTPNotFound()
+        if request.method == "POST":
+            try:
+                data = await request.json()
+            except (ValueError, TypeError):
+                raise web.HTTPBadRequest()
+            if not isinstance(data, dict):
+                raise web.HTTPBadRequest()
+            mode = data.get("mode")
+            duration = data.get("duration", 30)
+            if (mode not in ("normal","offline","unavailable","error","flaky","timeout","disconnect")
+                    or type(duration) is not int or not 5 <= duration <= 120):
+                raise web.HTTPBadRequest()
+            fault = mode
+            fault_count = 0
+            fault_until = time.monotonic() + duration if mode != "normal" else 0.0
+        return web.json_response({"mode":active_fault(),
+            "remaining":round(max(0,fault_until-time.monotonic()),1)})
+
     async def cleanup(app: web.Application) -> None:
         db.close()
 
@@ -56,6 +104,8 @@ def create_workload(backend_id: str, benchmark_token: str = "") -> web.Applicati
     app.router.add_get("/direct",item)
     if benchmark_token:
         app.router.add_post("/__benchmark/complexity", complexity)
+        app.router.add_get("/__benchmark/chaos", chaos)
+        app.router.add_post("/__benchmark/chaos", chaos)
     app.on_cleanup.append(cleanup)
     return app
 

@@ -496,7 +496,7 @@ def create_app(
 
     @app.api_route("/{path:path}", methods=sorted(METHODS))
     async def forward(request: Request, path: str):
-        if request.url.path == "/__benchmark/complexity":
+        if request.url.path.startswith("/__benchmark/") or request.url.path == "/__benchmark":
             raise HTTPException(404, "Not found")
         return await proxy.handle(request)
 

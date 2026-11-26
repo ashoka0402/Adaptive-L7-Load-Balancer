@@ -6,6 +6,11 @@
 </style></head><body><header><div><h1><strong>Pulse.</strong> Traffic Control Center</h1><small>Independent HTTP client · actual network requests</small></div><div><a id="monitor" href="http://localhost:8080/pulse/" target="_blank" rel="noopener">Open live monitor ↗</a></div></header>
 <main><div class="grid"><section class="card"><h2>Generate traffic</h2><p>Send real GET requests to the sample application's SQLite-backed item API. No fake metrics or direct telemetry updates.</p><div class="fields"><label>Requests / sec<input id="rate" type="number" min="1" max="300" value="40"></label><label>Duration (seconds)<input id="duration" type="number" min="5" max="120" value="60"></label><label>Max concurrency<input id="concurrency" type="number" min="1" max="64" value="32"></label><label>Pattern<select id="pattern"><option value="constant">Constant</option><option value="ramp">Gradual ramp</option><option value="burst">Recurring bursts</option></select></label></div><div class="actions"><button class="primary" id="start">Start real traffic</button><button id="stop">Stop</button></div><div class="notice" id="notice" role="status"></div><span id="state">Connecting</span><div class="meter"><i id="progress" style="width:0%"></i></div></section>
 <section class="card"><h2>Adaptive routing experiment</h2><p>While traffic is running, increase a backend's actual CPU computation. It stays online. Watch Pulse independently shift requests away, then restore the workload to test recovery.</p><div class="fields"><label>Sample backend<select id="backend"><option>backend-1</option><option selected>backend-2</option><option>backend-3</option></select></label><label>Compute workload<select id="work"><option value="50000">50k iterations</option><option value="100000">100k iterations</option><option value="200000" selected>200k iterations</option><option value="300000">300k iterations</option></select></label></div><div class="actions"><button id="slow">Increase CPU work</button><button id="restore">Restore normal work</button></div><div id="workStatus" style="margin-top:12px"></div></section>
+<section class="card wide"><h2>Chaos Mode <small style="font:12px ui-monospace;color:var(--gold)">LIVE FAULT INJECTION</small></h2>
+<p>Inject real HTTP failures into a selected sample application. Pulse receives no fault commands: it must react to health checks, response errors and transport failures. Faults expire automatically; the offline case is a service-level outage, not a stopped container.</p>
+<div class="fields"><label>Target backend<select id="chaosBackend"><option>backend-1</option><option selected>backend-2</option><option>backend-3</option></select></label><label>Auto-recovery (seconds)<select id="chaosDuration"><option>10</option><option selected>30</option><option>60</option><option>120</option></select></label></div>
+<div class="actions" id="chaosActions"><button data-fault="offline">Take offline (503 + health fail)</button><button data-fault="unavailable">Return 503 (healthy probe)</button><button data-fault="error">Return HTTP 500</button><button data-fault="flaky">Intermittent 500s</button><button data-fault="timeout">Request timeout</button><button data-fault="disconnect">Drop connection</button><button data-fault="normal">Recover selected</button><button id="chaosReset" class="primary">Recover all</button></div>
+<div class="notice" id="chaosNotice" role="status"></div><div id="chaosStatus" class="stats"></div><h2 style="font-size:17px">Fault timeline</h2><div id="chaosEvents" class="scroll"><small>No faults injected yet.</small></div></section>
 <section class="card wide"><h2>Actual client measurements</h2><div class="stats" id="stats"></div><canvas id="chart" role="img" aria-label="Offered requests versus successful responses per second"></canvas><small>Gold: offered requests · Green: completed successful responses in each second. Late responses can cross interval boundaries.</small></section>
 <section class="card"><h2>Successful responses by backend</h2><p>Whole run · measured from the response header.</p><div id="shares"></div></section><section class="card"><h2>Recent HTTP responses</h2><div class="scroll"><table><thead><tr><th>Request</th><th>HTTP</th><th>Backend</th><th>Latency</th></tr></thead><tbody id="recent"></tbody></table></div></section></div></main>
 <script>
@@ -21,6 +26,15 @@ $('start').onclick=()=>action('start',{rate:Number($('rate').value),duration:Num
 $('stop').onclick=()=>action('stop',{});
 $('slow').onclick=()=>action('work',{backend:$('backend').value,iterations:Number($('work').value)});
 $('restore').onclick=()=>action('work',{backend:$('backend').value,iterations:1000});
+let chaosBusy=false;
+async function chaosAction(path,body){
+ if(chaosBusy)return;chaosBusy=true;
+ try{await call(path,body);$('chaosNotice').textContent='';await refresh()}
+ catch(e){$('chaosNotice').textContent=e.message}
+ finally{chaosBusy=false}
+}
+for(const button of document.querySelectorAll('[data-fault]'))button.onclick=()=>chaosAction('chaos',{backend:$('chaosBackend').value,mode:button.dataset.fault,duration:Number($('chaosDuration').value)});
+$('chaosReset').onclick=()=>chaosAction('chaos/reset',{});
 function node(tag,text,cls){const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n}
 function graph(rows){
  const c=$('chart'),w=c.clientWidth,h=c.clientHeight,d=window.devicePixelRatio||1;if(!w||!h)return;
@@ -35,6 +49,16 @@ function render(s){
  current=s;$('state').textContent=s.state+' · '+s.elapsed+'s · '+s.inflight+' in flight';
  $('start').disabled=s.running;$('stop').disabled=!s.running;
  $('slow').disabled=$('restore').disabled=!s.workControl;
+ for(const b of $('chaosActions').querySelectorAll('button'))b.disabled=!s.workControl||chaosBusy;
+ const faults=$('chaosStatus');faults.replaceChildren();
+ for(const [backend,fault] of Object.entries(s.chaos||{})){
+   const card=node('div','','stat');const mode=node('b',fault.mode);
+   mode.style.fontSize='19px';mode.style.color=fault.mode==='normal'?'var(--green)':fault.mode==='unknown'?'var(--muted)':'var(--red)';
+   card.append(node('small',backend),mode,node('small',fault.remaining>0?'Auto-recovery in '+Math.ceil(fault.remaining)+'s':fault.mode==='normal'?'Normal service':'Status unavailable'));faults.append(card)
+ }
+ const timeline=$('chaosEvents');timeline.replaceChildren();
+ for(const e of [...(s.chaosEvents||[])].reverse())timeline.append(node('div',new Date(e.ts*1000).toLocaleTimeString()+' · '+e.backend+' · '+e.mode+' · '+e.source,'row'));
+ if(!timeline.childElementCount)timeline.append(node('small','No faults injected yet.'));
  $('progress').style.width=Math.min(100,s.elapsed/Math.max(1,s.options.duration||1)*100)+'%';
  const stat=$('stats');stat.replaceChildren();
  for(const [label,value] of [['Offered',s.offered],['Completed',s.completed],['Success',s.success],['Errors',s.errors],['Cancelled',s.cancelled],['Generator drops',s.dropped],['Goodput req/s',s.goodput],['p50 / p95 ms',s.p50+' / '+s.p95],['p99 ms',s.p99]]){const d=node('div','','stat');d.append(node('small',label),node('b',String(value)));stat.append(d)}
